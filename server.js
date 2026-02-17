@@ -15,10 +15,8 @@ const {
 } = process.env;
 
 async function refreshAccessToken() {
-  const tokenUrl = `${SF_INSTANCE_URL}/services/oauth2/token`;
-
   const response = await axios.post(
-    tokenUrl,
+    "https://login.salesforce.com/services/oauth2/token",
     new URLSearchParams({
       grant_type: "refresh_token",
       client_id: SF_CLIENT_ID,
