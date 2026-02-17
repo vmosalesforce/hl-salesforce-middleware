@@ -21,7 +21,7 @@ async function refreshAccessToken() {
       grant_type: "refresh_token",
       client_id: SF_CLIENT_ID,
       client_secret: SF_CLIENT_SECRET,
-      refresh_token: SF_REFRESH_TOKEN
+      refresh_token: process.env.SF_REFRESH_TOKEN
     }),
     {
       headers: { "Content-Type": "application/x-www-form-urlencoded" }
@@ -30,6 +30,13 @@ async function refreshAccessToken() {
 
   accessToken = response.data.access_token;
   tokenExpiry = Date.now() + 1000 * 60 * 90;
+
+  // 🔥 If Salesforce rotates the refresh token, update it in memory
+  if (response.data.refresh_token) {
+    console.log("🔄 Refresh token rotated by Salesforce");
+    process.env.SF_REFRESH_TOKEN = response.data.refresh_token;
+  }
+
   console.log("🔄 Refreshed Salesforce token");
 }
 
