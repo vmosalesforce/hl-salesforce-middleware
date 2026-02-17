@@ -40,9 +40,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     const hlData = req.body;
-
-   const hlData = req.body;
-
+    
 // Safely extract values from HighLevel
 const firstName =
   hlData.FirstName ||
