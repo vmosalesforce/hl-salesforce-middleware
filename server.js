@@ -41,13 +41,36 @@ app.post("/webhook", async (req, res) => {
 
     const hlData = req.body;
 
-    const sfResponse = await axios.post(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
-      {
-        FirstName: hlData.firstName,
-        LastName: hlData.lastName,
-        Email: hlData.email
-      },
+   const hlData = req.body;
+
+// Safely extract values from HighLevel
+const firstName =
+  hlData.FirstName ||
+  hlData.firstName ||
+  hlData.first_name ||
+  "";
+
+let lastName =
+  hlData.LastName ||
+  hlData.lastName ||
+  hlData.last_name ||
+  "";
+
+// Prevent blank or merge-tag placeholders
+if (!lastName || lastName.includes("{{")) {
+  lastName = "Unknown";
+}
+
+const sfResponse = await axios.post(
+  `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
+  {
+    FirstName: firstName,
+    LastName: lastName,
+    Email: hlData.Email || hlData.email,
+    Phone: hlData.Phone || hlData.phone,
+    High_Level_ID__c: hlData.High_Level_ID__c,
+    High_Level__c: true
+  },
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
