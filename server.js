@@ -103,7 +103,7 @@ app.post("/sf-webhook", async (req, res) => {
     const sfData = req.body;
 
     const hlResponse = await axios.post(
-      "https://services.leadconnectorhq.com/contacts/",
+    "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: process.env.HL_LOCATION_ID,
         firstName: sfData.FirstName,
