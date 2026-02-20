@@ -42,7 +42,7 @@ async function refreshAccessToken() {
 }
 
 // =======================
-// HighLevel ➜ Salesforce
+// HighLevel ➜ Salesforce (LIVE)
 // =======================
 app.post("/webhook", async (req, res) => {
   try {
@@ -95,13 +95,19 @@ app.post("/webhook", async (req, res) => {
 });
 
 // =======================
-// Salesforce ➜ HighLevel
+// Salesforce ➜ HighLevel (NOT LIVE YET)
 // =======================
 app.post("/sf-webhook", async (req, res) => {
   try {
     const sfData = req.body;
 
-    // Ensure at least email or phone exists
+    // 🔁 Loop prevention
+    if (sfData.High_Level__c === true) {
+      return res.status(200).json({
+        skipped: "Originated from HighLevel"
+      });
+    }
+
     if (!sfData.Email && !sfData.Phone) {
       return res.status(400).json({
         error: "Email or Phone required for HighLevel upsert"
