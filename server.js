@@ -14,6 +14,9 @@ const {
   SF_INSTANCE_URL
 } = process.env;
 
+// =======================
+// Salesforce Token Refresh
+// =======================
 async function refreshAccessToken() {
   const response = await axios.post(
     "https://login.salesforce.com/services/oauth2/token",
@@ -31,7 +34,6 @@ async function refreshAccessToken() {
   accessToken = response.data.access_token;
   tokenExpiry = Date.now() + 1000 * 60 * 90;
 
-  // 🔥 If Salesforce rotates the refresh token, update it in memory
   if (response.data.refresh_token) {
     console.log("🔄 Refresh token rotated by Salesforce");
     process.env.SF_REFRESH_TOKEN = response.data.refresh_token;
@@ -40,6 +42,9 @@ async function refreshAccessToken() {
   console.log("🔄 Refreshed Salesforce token");
 }
 
+// =======================
+// HighLevel ➜ Salesforce
+// =======================
 app.post("/webhook", async (req, res) => {
   try {
     if (!accessToken || Date.now() > tokenExpiry) {
@@ -47,35 +52,33 @@ app.post("/webhook", async (req, res) => {
     }
 
     const hlData = req.body;
-    
-// Safely extract values from HighLevel
-const firstName =
-  hlData.FirstName ||
-  hlData.firstName ||
-  hlData.first_name ||
-  "";
 
-let lastName =
-  hlData.LastName ||
-  hlData.lastName ||
-  hlData.last_name ||
-  "";
+    const firstName =
+      hlData.FirstName ||
+      hlData.firstName ||
+      hlData.first_name ||
+      "";
 
-// Prevent blank or merge-tag placeholders
-if (!lastName || lastName.includes("{{")) {
-  lastName = "Unknown";
-}
+    let lastName =
+      hlData.LastName ||
+      hlData.lastName ||
+      hlData.last_name ||
+      "";
 
-const sfResponse = await axios.post(
-  `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
-  {
-    FirstName: firstName,
-    LastName: lastName,
-    Email: hlData.Email || hlData.email,
-    Phone: hlData.Phone || hlData.phone,
-    High_Level_ID__c: hlData.High_Level_ID__c,
-    High_Level__c: true
-  },
+    if (!lastName || lastName.includes("{{")) {
+      lastName = "Unknown";
+    }
+
+    const sfResponse = await axios.post(
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
+      {
+        FirstName: firstName,
+        LastName: lastName,
+        Email: hlData.Email || hlData.email,
+        Phone: hlData.Phone || hlData.phone,
+        High_Level_ID__c: hlData.High_Level_ID__c,
+        High_Level__c: true
+      },
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -89,6 +92,45 @@ const sfResponse = await axios.post(
   } catch (error) {
     console.error(error.response?.data || error.message);
     res.status(500).json({ error: "Salesforce call failed" });
+  }
+});
+
+// =======================
+// Salesforce ➜ HighLevel
+// =======================
+app.post("/sf-webhook", async (req, res) => {
+  try {
+    const sfData = req.body;
+
+    const hlResponse = await axios.post(
+      "https://services.leadconnectorhq.com/contacts/",
+      {
+        locationId: process.env.HL_LOCATION_ID,
+        firstName: sfData.FirstName,
+        lastName: sfData.LastName,
+        email: sfData.Email,
+        phone: sfData.Phone,
+        customFields: [
+          {
+            key: "salesforce_contact_id",
+            value: sfData.Id
+          }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HL_API_KEY}`,
+          Version: "2021-07-28",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    res.status(200).json({ success: true, highlevel: hlResponse.data });
+
+  } catch (error) {
+    console.error(error.response?.data || error.message);
+    res.status(500).json({ error: "HighLevel call failed" });
   }
 });
 
