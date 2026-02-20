@@ -35,7 +35,6 @@ async function refreshAccessToken() {
   tokenExpiry = Date.now() + 1000 * 60 * 90;
 
   if (response.data.refresh_token) {
-    console.log("🔄 Refresh token rotated by Salesforce");
     process.env.SF_REFRESH_TOKEN = response.data.refresh_token;
   }
 
@@ -102,11 +101,17 @@ app.post("/sf-webhook", async (req, res) => {
   try {
     const sfData = req.body;
 
+    // Ensure at least email or phone exists
+    if (!sfData.Email && !sfData.Phone) {
+      return res.status(400).json({
+        error: "Email or Phone required for HighLevel upsert"
+      });
+    }
+
     const hlResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: process.env.HL_LOCATION_ID,
-        externalId: sfData.Id, // 👈 This ensures stable upsert matching
         firstName: sfData.FirstName,
         lastName: sfData.LastName,
         email: sfData.Email,
