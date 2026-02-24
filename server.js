@@ -11,7 +11,9 @@ const {
   SF_CLIENT_ID,
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
-  SF_INSTANCE_URL
+  SF_INSTANCE_URL,
+  HL_API_KEY,
+  HL_LOCATION_ID
 } = process.env;
 
 // =======================
@@ -24,7 +26,7 @@ async function refreshAccessToken() {
       grant_type: "refresh_token",
       client_id: SF_CLIENT_ID,
       client_secret: SF_CLIENT_SECRET,
-      refresh_token: process.env.SF_REFRESH_TOKEN
+      refresh_token: SF_REFRESH_TOKEN
     }),
     {
       headers: { "Content-Type": "application/x-www-form-urlencoded" }
@@ -32,17 +34,13 @@ async function refreshAccessToken() {
   );
 
   accessToken = response.data.access_token;
-  tokenExpiry = Date.now() + 1000 * 60 * 90;
-
-  if (response.data.refresh_token) {
-    process.env.SF_REFRESH_TOKEN = response.data.refresh_token;
-  }
+  tokenExpiry = Date.now() + 1000 * 60 * 90; // 90 minutes
 
   console.log("🔄 Refreshed Salesforce token");
 }
 
 // =======================
-// HighLevel ➜ Salesforce (LIVE)
+// HighLevel ➜ Salesforce
 // =======================
 app.post("/webhook", async (req, res) => {
   try {
@@ -95,13 +93,13 @@ app.post("/webhook", async (req, res) => {
 });
 
 // =======================
-// Salesforce ➜ HighLevel (NOT LIVE YET)
+// Salesforce ➜ HighLevel
 // =======================
 app.post("/sf-webhook", async (req, res) => {
   try {
     const sfData = req.body;
 
-    // 🔁 Loop prevention
+    // 🛑 Prevent loop (don’t resend HL-originated records)
     if (sfData.High_Level__c === true) {
       return res.status(200).json({
         skipped: "Originated from HighLevel"
@@ -117,21 +115,21 @@ app.post("/sf-webhook", async (req, res) => {
     const hlResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
-        locationId: process.env.HL_LOCATION_ID,
+        locationId: HL_LOCATION_ID,
         firstName: sfData.FirstName,
         lastName: sfData.LastName,
         email: sfData.Email,
         phone: sfData.Phone,
         customFields: [
           {
-            key: "salesforce_contact_id",
-            value: sfData.Id
+            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field
+            field_value: sfData.Id
           }
         ]
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.HL_API_KEY}`,
+          Authorization: `Bearer ${HL_API_KEY}`,
           Version: "2021-07-28",
           "Content-Type": "application/json"
         }
@@ -145,27 +143,7 @@ app.post("/sf-webhook", async (req, res) => {
     res.status(500).json({ error: "HighLevel call failed" });
   }
 });
-// =======================
-// DEBUG: Get HighLevel Custom Fields
-// =======================
-app.get("/hl-fields", async (req, res) => {
-  try {
-    const response = await axios.get(
-      `https://services.leadconnectorhq.com/locations/${process.env.HL_LOCATION_ID}/customFields`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.HL_API_KEY}`,
-          Version: "2021-07-28"
-        }
-      }
-    );
 
-    res.json(response.data);
-  } catch (error) {
-    console.error(error.response?.data || error.message);
-    res.status(500).json({ error: "Failed to fetch fields" });
-  }
-});
 app.listen(3000, () => {
   console.log("🚀 Server running on port 3000");
 });
