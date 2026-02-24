@@ -4,6 +4,13 @@ import axios from "axios";
 const app = express();
 app.use(express.json());
 
+// =====================================
+// Health Check Route (VERY IMPORTANT)
+// =====================================
+app.get("/", (req, res) => {
+  res.status(200).send("Middleware is running");
+});
+
 let accessToken = null;
 let tokenExpiry = 0;
 
@@ -87,7 +94,7 @@ app.post("/webhook", async (req, res) => {
     res.status(200).json({ success: true, salesforce: sfResponse.data });
 
   } catch (error) {
-    console.error(error.response?.data || error.message);
+    console.error("HL ➜ SF Error:", error.response?.data || error.message);
     res.status(500).json({ error: "Salesforce call failed" });
   }
 });
@@ -122,7 +129,7 @@ app.post("/sf-webhook", async (req, res) => {
         phone: sfData.Phone,
         customFields: [
           {
-            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field
+            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field in HL
             field_value: sfData.Id
           }
         ]
@@ -139,11 +146,14 @@ app.post("/sf-webhook", async (req, res) => {
     res.status(200).json({ success: true, highlevel: hlResponse.data });
 
   } catch (error) {
-    console.error(error.response?.data || error.message);
+    console.error("SF ➜ HL Error:", error.response?.data || error.message);
     res.status(500).json({ error: "HighLevel call failed" });
   }
 });
 
+// =======================
+// Start Server
+// =======================
 app.listen(3000, () => {
   console.log("🚀 Server running on port 3000");
 });
