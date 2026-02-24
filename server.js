@@ -145,7 +145,27 @@ app.post("/sf-webhook", async (req, res) => {
     res.status(500).json({ error: "HighLevel call failed" });
   }
 });
+// =======================
+// DEBUG: Get HighLevel Custom Fields
+// =======================
+app.get("/hl-fields", async (req, res) => {
+  try {
+    const response = await axios.get(
+      `https://services.leadconnectorhq.com/locations/${process.env.HL_LOCATION_ID}/customFields`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HL_API_KEY}`,
+          Version: "2021-07-28"
+        }
+      }
+    );
 
+    res.json(response.data);
+  } catch (error) {
+    console.error(error.response?.data || error.message);
+    res.status(500).json({ error: "Failed to fetch fields" });
+  }
+});
 app.listen(3000, () => {
   console.log("🚀 Server running on port 3000");
 });
