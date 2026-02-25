@@ -44,7 +44,7 @@ async function refreshAccessToken() {
 }
 
 // =======================
-// HIGHLEVEL ➜ SALESFORCE
+// HL ➜ SF
 // =======================
 app.post("/webhook", async (req, res) => {
   try {
@@ -56,11 +56,12 @@ app.post("/webhook", async (req, res) => {
 
     const hlData = req.body;
 
-    // ✅ HL ID is being sent as High_Level_ID__c
+    // ✅ Correct extraction for YOUR webhook
     const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
-      console.log("⚠️ Missing High_Level_ID__c in payload");
+      console.log("⚠️ High_Level_ID__c missing in payload");
+      console.log(JSON.stringify(hlData, null, 2));
       return res.status(200).json({ skipped: "Missing HL ID" });
     }
 
@@ -71,7 +72,7 @@ app.post("/webhook", async (req, res) => {
 
     let sfContactId;
 
-    // Check if already exists
+    // 🔎 Check if contact already exists in Salesforce
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -114,7 +115,7 @@ app.post("/webhook", async (req, res) => {
       {
         customFields: [
           {
-            id: "0w8kYzW7XY8L0rRwxEHA",
+            id: "0w8kYzW7XY8L0rRwxEHA", // Your SF Contact ID field in HL
             field_value: sfContactId
           }
         ]
@@ -139,7 +140,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // =======================
-// SALESFORCE ➜ HIGHLEVEL
+// SF ➜ HL
 // =======================
 app.post("/sf-webhook", async (req, res) => {
   try {
