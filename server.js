@@ -20,7 +20,7 @@ let accessToken = null;
 let tokenExpiry = 0;
 
 // =======================
-// Health Check
+// Health Check Route
 // =======================
 app.get("/", (req, res) => {
   res.status(200).send("🚀 HL ↔ SF Middleware Running");
@@ -102,7 +102,8 @@ app.post("/webhook", async (req, res) => {
           LastName: lastName,
           Email: hlData.Email || hlData.email,
           Phone: hlData.Phone || hlData.phone,
-          High_Level_ID__c: hlData.id
+          High_Level_ID__c: hlData.id,
+          Origin_From_HL_c: true
         },
         {
           headers: {
@@ -122,7 +123,7 @@ app.post("/webhook", async (req, res) => {
       {
         customFields: [
           {
-            id: "0w8kYzW7XY8L0rRwxEHA", // Your SF Contact ID field ID in HL
+            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field in HL
             field_value: sfContactId
           }
         ]
@@ -155,10 +156,10 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    // Prevent infinite loop
-    if (sfData.High_Level_ID__c) {
-      console.log("⏭ Already synced to HL");
-      return res.status(200).json({ skipped: "Already synced" });
+    // Prevent loop (skip if originated from HL)
+    if (sfData.Origin_From_HL_c === true) {
+      console.log("⏭ Skipped — Originated from HL");
+      return res.status(200).json({ skipped: "Originated from HL" });
     }
 
     if (!sfData.Email && !sfData.Phone) {
@@ -167,7 +168,6 @@ app.post("/sf-webhook", async (req, res) => {
       });
     }
 
-    // 🔁 Send to HighLevel
     const hlResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
@@ -190,12 +190,10 @@ app.post("/sf-webhook", async (req, res) => {
 
     console.log("✅ Sent to HighLevel:", hlContactId);
 
-    // Refresh SF token if needed
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
     }
 
-    // 🔁 Write HL Contact ID back to Salesforce
     await axios.patch(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
@@ -211,10 +209,7 @@ app.post("/sf-webhook", async (req, res) => {
 
     console.log("🔁 HL ID written back to Salesforce");
 
-    res.status(200).json({
-      success: true,
-      highlevel: hlResponse.data
-    });
+    res.status(200).json({ success: true });
 
   } catch (error) {
     console.error("❌ SF ➜ HL Error:", error.response?.data || error.message);
