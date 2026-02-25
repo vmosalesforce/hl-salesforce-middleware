@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // =====================================
-// Health Check Route (VERY IMPORTANT)
+// Health Check Route (Required)
 // =====================================
 app.get("/", (req, res) => {
   res.status(200).send("Middleware is running");
@@ -23,9 +23,9 @@ const {
   HL_LOCATION_ID
 } = process.env;
 
-// =======================
+// =====================================
 // Salesforce Token Refresh
-// =======================
+// =====================================
 async function refreshAccessToken() {
   const response = await axios.post(
     "https://login.salesforce.com/services/oauth2/token",
@@ -41,14 +41,14 @@ async function refreshAccessToken() {
   );
 
   accessToken = response.data.access_token;
-  tokenExpiry = Date.now() + 1000 * 60 * 90; // 90 minutes
+  tokenExpiry = Date.now() + 1000 * 60 * 90;
 
   console.log("🔄 Refreshed Salesforce token");
 }
 
-// =======================
-// HighLevel ➜ Salesforce
-// =======================
+// =====================================
+// HighLevel ➜ Salesforce (UPSERT SAFE)
+// =====================================
 app.post("/webhook", async (req, res) => {
   try {
     if (!accessToken || Date.now() > tokenExpiry) {
@@ -56,6 +56,14 @@ app.post("/webhook", async (req, res) => {
     }
 
     const hlData = req.body;
+
+    const hlId = hlData.id || hlData.High_Level_ID__c;
+
+    if (!hlId) {
+      return res.status(400).json({
+        error: "HighLevel ID missing"
+      });
+    }
 
     const firstName =
       hlData.FirstName ||
@@ -73,14 +81,15 @@ app.post("/webhook", async (req, res) => {
       lastName = "Unknown";
     }
 
-    const sfResponse = await axios.post(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
+    // 🔥 UPSERT by External ID (Prevents duplicates)
+    await axios.patch(
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/High_Level_ID__c/${hlId}`,
       {
         FirstName: firstName,
         LastName: lastName,
         Email: hlData.Email || hlData.email,
         Phone: hlData.Phone || hlData.phone,
-        High_Level_ID__c: hlData.High_Level_ID__c,
+        High_Level_ID__c: hlId,
         High_Level__c: true
       },
       {
@@ -91,22 +100,22 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    res.status(200).json({ success: true, salesforce: sfResponse.data });
+    res.status(200).json({ success: true });
 
   } catch (error) {
     console.error("HL ➜ SF Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Salesforce call failed" });
+    res.status(500).json({ error: "Salesforce upsert failed" });
   }
 });
 
-// =======================
+// =====================================
 // Salesforce ➜ HighLevel
-// =======================
+// =====================================
 app.post("/sf-webhook", async (req, res) => {
   try {
     const sfData = req.body;
 
-    // 🛑 Prevent loop (don’t resend HL-originated records)
+    // Prevent loop
     if (sfData.High_Level__c === true) {
       return res.status(200).json({
         skipped: "Originated from HighLevel"
@@ -115,7 +124,7 @@ app.post("/sf-webhook", async (req, res) => {
 
     if (!sfData.Email && !sfData.Phone) {
       return res.status(400).json({
-        error: "Email or Phone required for HighLevel upsert"
+        error: "Email or Phone required"
       });
     }
 
@@ -129,7 +138,7 @@ app.post("/sf-webhook", async (req, res) => {
         phone: sfData.Phone,
         customFields: [
           {
-            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field in HL
+            id: "0w8kYzW7XY8L0rRwxEHA",
             field_value: sfData.Id
           }
         ]
@@ -147,13 +156,13 @@ app.post("/sf-webhook", async (req, res) => {
 
   } catch (error) {
     console.error("SF ➜ HL Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "HighLevel call failed" });
+    res.status(500).json({ error: "HighLevel upsert failed" });
   }
 });
 
-// =======================
+// =====================================
 // Start Server
-// =======================
+// =====================================
 app.listen(3000, () => {
   console.log("🚀 Server running on port 3000");
 });
