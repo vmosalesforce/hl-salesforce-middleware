@@ -4,13 +4,6 @@ import axios from "axios";
 const app = express();
 app.use(express.json());
 
-// =====================================
-// Health Check Route
-// =====================================
-app.get("/", (req, res) => {
-  res.status(200).send("Middleware is running");
-});
-
 let accessToken = null;
 let tokenExpiry = 0;
 
@@ -23,9 +16,9 @@ const {
   HL_LOCATION_ID
 } = process.env;
 
-// =====================================
-// Salesforce Token Refresh
-// =====================================
+// =======================
+// Refresh Salesforce Token
+// =======================
 async function refreshAccessToken() {
   const response = await axios.post(
     "https://login.salesforce.com/services/oauth2/token",
@@ -41,14 +34,14 @@ async function refreshAccessToken() {
   );
 
   accessToken = response.data.access_token;
-  tokenExpiry = Date.now() + 1000 * 60 * 90; // 90 minutes
+  tokenExpiry = Date.now() + 1000 * 60 * 90;
 
-  console.log("🔄 Refreshed Salesforce token");
+  console.log("🔄 Salesforce token refreshed");
 }
 
-// =====================================
-// HighLevel ➜ Salesforce (UPSERT SAFE)
-// =====================================
+// =======================
+// HighLevel ➜ Salesforce
+// =======================
 app.post("/webhook", async (req, res) => {
   try {
     if (!accessToken || Date.now() > tokenExpiry) {
@@ -56,14 +49,6 @@ app.post("/webhook", async (req, res) => {
     }
 
     const hlData = req.body;
-
-    const hlId = hlData.id || hlData.High_Level_ID__c;
-
-    if (!hlId) {
-      return res.status(400).json({
-        error: "HighLevel ID missing"
-      });
-    }
 
     const firstName =
       hlData.FirstName ||
@@ -81,15 +66,32 @@ app.post("/webhook", async (req, res) => {
       lastName = "Unknown";
     }
 
-    // 🔥 UPSERT by External ID (prevents duplicates)
-    await axios.patch(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/High_Level_ID__c/${hlId}`,
+    // 🔎 Check if Contact already exists by HL ID
+    const query = await axios.get(
+      `${SF_INSTANCE_URL}/services/data/v60.0/query`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: {
+          q: `SELECT Id FROM Contact WHERE High_Level_ID__c = '${hlData.id}' LIMIT 1`
+        }
+      }
+    );
+
+    if (query.data.records.length > 0) {
+      return res.status(200).json({
+        skipped: "Contact already exists in Salesforce"
+      });
+    }
+
+    // 🔁 Create Contact
+    const sfResponse = await axios.post(
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
         FirstName: firstName,
         LastName: lastName,
         Email: hlData.Email || hlData.email,
         Phone: hlData.Phone || hlData.phone,
-        High_Level__c: true
+        High_Level_ID__c: hlData.id
       },
       {
         headers: {
@@ -99,25 +101,25 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    res.status(200).json({ success: true });
+    res.status(200).json({ success: true, salesforce: sfResponse.data });
 
   } catch (error) {
     console.error("HL ➜ SF Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Salesforce upsert failed" });
+    res.status(500).json({ error: "Salesforce call failed" });
   }
 });
 
-// =====================================
+// =======================
 // Salesforce ➜ HighLevel
-// =====================================
+// =======================
 app.post("/sf-webhook", async (req, res) => {
   try {
     const sfData = req.body;
 
-    // Prevent loop (don’t resend HL-originated records)
-    if (sfData.High_Level__c === true) {
+    // Prevent infinite loop
+    if (sfData.High_Level_ID__c) {
       return res.status(200).json({
-        skipped: "Originated from HighLevel"
+        skipped: "Already synced to HighLevel"
       });
     }
 
@@ -127,6 +129,7 @@ app.post("/sf-webhook", async (req, res) => {
       });
     }
 
+    // 🔁 Send to HighLevel
     const hlResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
@@ -134,13 +137,7 @@ app.post("/sf-webhook", async (req, res) => {
         firstName: sfData.FirstName,
         lastName: sfData.LastName,
         email: sfData.Email,
-        phone: sfData.Phone,
-        customFields: [
-          {
-            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field in HL
-            field_value: sfData.Id
-          }
-        ]
+        phone: sfData.Phone
       },
       {
         headers: {
@@ -151,17 +148,39 @@ app.post("/sf-webhook", async (req, res) => {
       }
     );
 
-    res.status(200).json({ success: true, highlevel: hlResponse.data });
+    const hlContactId = hlResponse.data.contact.id;
+
+    // Refresh SF token if needed
+    if (!accessToken || Date.now() > tokenExpiry) {
+      await refreshAccessToken();
+    }
+
+    // 🔁 Write HL Contact ID back to Salesforce
+    await axios.patch(
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
+      {
+        High_Level_ID__c: hlContactId
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      highlevel: hlResponse.data
+    });
 
   } catch (error) {
     console.error("SF ➜ HL Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "HighLevel upsert failed" });
+    res.status(500).json({ error: "HighLevel call failed" });
   }
 });
 
-// =====================================
-// Start Server
-// =====================================
+// =======================
 app.listen(3000, () => {
   console.log("🚀 Server running on port 3000");
 });
