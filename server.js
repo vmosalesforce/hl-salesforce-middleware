@@ -4,9 +4,9 @@ import axios from "axios";
 const app = express();
 app.use(express.json());
 
-let accessToken = null;
-let tokenExpiry = 0;
-
+// =======================
+// Environment Variables
+// =======================
 const {
   SF_CLIENT_ID,
   SF_CLIENT_SECRET,
@@ -15,6 +15,16 @@ const {
   HL_API_KEY,
   HL_LOCATION_ID
 } = process.env;
+
+let accessToken = null;
+let tokenExpiry = 0;
+
+// =======================
+// Health Check Route
+// =======================
+app.get("/", (req, res) => {
+  res.status(200).send("🚀 HL ↔ SF Middleware Running");
+});
 
 // =======================
 // Refresh Salesforce Token
@@ -44,6 +54,8 @@ async function refreshAccessToken() {
 // =======================
 app.post("/webhook", async (req, res) => {
   try {
+    console.log("📩 HL ➜ SF received");
+
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
     }
@@ -66,7 +78,7 @@ app.post("/webhook", async (req, res) => {
       lastName = "Unknown";
     }
 
-    // 🔎 Check if Contact already exists by HL ID
+    // Prevent duplicate by HL ID
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -78,12 +90,12 @@ app.post("/webhook", async (req, res) => {
     );
 
     if (query.data.records.length > 0) {
+      console.log("⏭ Skipped duplicate HL ID");
       return res.status(200).json({
-        skipped: "Contact already exists in Salesforce"
+        skipped: "Contact already exists"
       });
     }
 
-    // 🔁 Create Contact
     const sfResponse = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
@@ -101,10 +113,12 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
+    console.log("✅ Contact created in Salesforce");
+
     res.status(200).json({ success: true, salesforce: sfResponse.data });
 
   } catch (error) {
-    console.error("HL ➜ SF Error:", error.response?.data || error.message);
+    console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
     res.status(500).json({ error: "Salesforce call failed" });
   }
 });
@@ -114,12 +128,15 @@ app.post("/webhook", async (req, res) => {
 // =======================
 app.post("/sf-webhook", async (req, res) => {
   try {
+    console.log("📩 SF ➜ HL received");
+
     const sfData = req.body;
 
-    // Prevent infinite loop
+    // Prevent loop if already synced
     if (sfData.High_Level_ID__c) {
+      console.log("⏭ Already synced to HL");
       return res.status(200).json({
-        skipped: "Already synced to HighLevel"
+        skipped: "Already synced"
       });
     }
 
@@ -150,6 +167,8 @@ app.post("/sf-webhook", async (req, res) => {
 
     const hlContactId = hlResponse.data.contact.id;
 
+    console.log("✅ Sent to HighLevel:", hlContactId);
+
     // Refresh SF token if needed
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -169,13 +188,15 @@ app.post("/sf-webhook", async (req, res) => {
       }
     );
 
+    console.log("🔁 HL ID written back to Salesforce");
+
     res.status(200).json({
       success: true,
       highlevel: hlResponse.data
     });
 
   } catch (error) {
-    console.error("SF ➜ HL Error:", error.response?.data || error.message);
+    console.error("❌ SF ➜ HL Error:", error.response?.data || error.message);
     res.status(500).json({ error: "HighLevel call failed" });
   }
 });
