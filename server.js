@@ -20,7 +20,7 @@ let accessToken = null;
 let tokenExpiry = 0;
 
 // =======================
-// Health Check Route
+// Health Check
 // =======================
 app.get("/", (req, res) => {
   res.status(200).send("🚀 HL ↔ SF Middleware Running");
@@ -78,7 +78,9 @@ app.post("/webhook", async (req, res) => {
       lastName = "Unknown";
     }
 
-    // Prevent duplicate by HL ID
+    let sfContactId;
+
+    // 🔎 Check if already exists by HL ID
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -90,32 +92,53 @@ app.post("/webhook", async (req, res) => {
     );
 
     if (query.data.records.length > 0) {
-      console.log("⏭ Skipped duplicate HL ID");
-      return res.status(200).json({
-        skipped: "Contact already exists"
-      });
+      sfContactId = query.data.records[0].Id;
+      console.log("⏭ Existing Salesforce contact found:", sfContactId);
+    } else {
+      const sfResponse = await axios.post(
+        `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
+        {
+          FirstName: firstName,
+          LastName: lastName,
+          Email: hlData.Email || hlData.email,
+          Phone: hlData.Phone || hlData.phone,
+          High_Level_ID__c: hlData.id
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      sfContactId = sfResponse.data.id;
+      console.log("✅ Contact created in Salesforce:", sfContactId);
     }
 
-    const sfResponse = await axios.post(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
+    // 🔁 Write Salesforce ID back to HighLevel
+    await axios.put(
+      `https://services.leadconnectorhq.com/contacts/${hlData.id}`,
       {
-        FirstName: firstName,
-        LastName: lastName,
-        Email: hlData.Email || hlData.email,
-        Phone: hlData.Phone || hlData.phone,
-        High_Level_ID__c: hlData.id
+        customFields: [
+          {
+            id: "0w8kYzW7XY8L0rRwxEHA", // Your SF Contact ID field ID in HL
+            field_value: sfContactId
+          }
+        ]
       },
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${HL_API_KEY}`,
+          Version: "2021-07-28",
           "Content-Type": "application/json"
         }
       }
     );
 
-    console.log("✅ Contact created in Salesforce");
+    console.log("🔁 Salesforce ID written back to HighLevel");
 
-    res.status(200).json({ success: true, salesforce: sfResponse.data });
+    res.status(200).json({ success: true });
 
   } catch (error) {
     console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
@@ -132,12 +155,10 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    // Prevent loop if already synced
+    // Prevent infinite loop
     if (sfData.High_Level_ID__c) {
       console.log("⏭ Already synced to HL");
-      return res.status(200).json({
-        skipped: "Already synced"
-      });
+      return res.status(200).json({ skipped: "Already synced" });
     }
 
     if (!sfData.Email && !sfData.Phone) {
