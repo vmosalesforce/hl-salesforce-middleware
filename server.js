@@ -27,7 +27,7 @@ app.get("/", (req, res) => {
 });
 
 // =======================
-// REFRESH SF TOKEN
+// REFRESH SALESFORCE TOKEN
 // =======================
 async function refreshAccessToken() {
   const response = await axios.post(
@@ -50,7 +50,7 @@ async function refreshAccessToken() {
 }
 
 // =======================
-// HL ➜ SF
+// HIGHLEVEL ➜ SALESFORCE
 // =======================
 app.post("/webhook", async (req, res) => {
   try {
@@ -62,31 +62,56 @@ app.post("/webhook", async (req, res) => {
 
     const hlData = req.body;
 
+    // 🔥 Extract HL Contact ID safely
+    const hlContactId =
+      hlData.id ||
+      hlData.contact?.id ||
+      hlData.contactId;
+
+    if (!hlContactId) {
+      throw new Error("HighLevel Contact ID missing in payload");
+    }
+
+    // Extract fields safely
     const firstName =
-      hlData.FirstName ||
       hlData.firstName ||
+      hlData.FirstName ||
       hlData.first_name ||
+      hlData.contact?.firstName ||
       "";
 
     let lastName =
-      hlData.LastName ||
       hlData.lastName ||
+      hlData.LastName ||
       hlData.last_name ||
+      hlData.contact?.lastName ||
       "";
 
     if (!lastName || lastName.includes("{{")) {
       lastName = "Unknown";
     }
 
+    const email =
+      hlData.email ||
+      hlData.Email ||
+      hlData.contact?.email ||
+      null;
+
+    const phone =
+      hlData.phone ||
+      hlData.Phone ||
+      hlData.contact?.phone ||
+      null;
+
     let sfContactId;
 
-    // 🔎 Check if contact already exists by HL ID
+    // 🔎 Check if contact already exists in SF by HL ID
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
         params: {
-          q: `SELECT Id FROM Contact WHERE High_Level_ID__c = '${hlData.id}' LIMIT 1`
+          q: `SELECT Id FROM Contact WHERE High_Level_ID__c = '${hlContactId}' LIMIT 1`
         }
       }
     );
@@ -100,9 +125,9 @@ app.post("/webhook", async (req, res) => {
         {
           FirstName: firstName,
           LastName: lastName,
-          Email: hlData.Email || hlData.email,
-          Phone: hlData.Phone || hlData.phone,
-          High_Level_ID__c: hlData.id,
+          Email: email,
+          Phone: phone,
+          High_Level_ID__c: hlContactId,
           Origin_From_HL_c__c: true
         },
         {
@@ -117,13 +142,13 @@ app.post("/webhook", async (req, res) => {
       console.log("✅ Contact created in Salesforce:", sfContactId);
     }
 
-    // 🔁 Write SF ID back to HighLevel
+    // 🔁 Write Salesforce ID back to HighLevel
     await axios.put(
-      `https://services.leadconnectorhq.com/contacts/${hlData.id}`,
+      `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
       {
         customFields: [
           {
-            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID custom field in HL
+            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID custom field
             field_value: sfContactId
           }
         ]
@@ -148,7 +173,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // =======================
-// SF ➜ HL
+// SALESFORCE ➜ HIGHLEVEL
 // =======================
 app.post("/sf-webhook", async (req, res) => {
   try {
@@ -187,7 +212,6 @@ app.post("/sf-webhook", async (req, res) => {
     );
 
     const hlContactId = hlResponse.data.contact.id;
-
     console.log("✅ Sent to HighLevel:", hlContactId);
 
     if (!accessToken || Date.now() > tokenExpiry) {
