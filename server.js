@@ -4,9 +4,6 @@ import axios from "axios";
 const app = express();
 app.use(express.json());
 
-// =======================
-// ENV VARIABLES
-// =======================
 const {
   SF_CLIENT_ID,
   SF_CLIENT_SECRET,
@@ -43,7 +40,6 @@ async function refreshAccessToken() {
 
   accessToken = response.data.access_token;
   tokenExpiry = Date.now() + 1000 * 60 * 90;
-
   console.log("🔄 Salesforce token refreshed");
 }
 
@@ -60,45 +56,22 @@ app.post("/webhook", async (req, res) => {
 
     const hlData = req.body;
 
-    // 🔎 Extract HL Contact ID safely (supports multiple formats)
-    const hlContactId =
-      hlData.id ||
-      hlData.contactId ||
-      hlData.contact?.id ||
-      hlData.data?.id ||
-      null;
+    // ✅ HL ID is being sent as High_Level_ID__c
+    const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
-      console.log("⚠️ HL payload missing contact ID. Payload:");
-      console.log(JSON.stringify(hlData, null, 2));
-      return res.status(200).json({ skipped: "Missing HL contact ID" });
+      console.log("⚠️ Missing High_Level_ID__c in payload");
+      return res.status(200).json({ skipped: "Missing HL ID" });
     }
 
-    const firstName =
-      hlData.firstName ||
-      hlData.contact?.firstName ||
-      "";
-
-    let lastName =
-      hlData.lastName ||
-      hlData.contact?.lastName ||
-      "";
-
-    if (!lastName) lastName = "Unknown";
-
-    const email =
-      hlData.email ||
-      hlData.contact?.email ||
-      null;
-
-    const phone =
-      hlData.phone ||
-      hlData.contact?.phone ||
-      null;
+    const firstName = hlData.FirstName || "";
+    const lastName = hlData.LastName || "Unknown";
+    const email = hlData.Email || null;
+    const phone = hlData.Phone || null;
 
     let sfContactId;
 
-    // 🔎 Check if already exists in Salesforce
+    // Check if already exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -135,32 +108,27 @@ app.post("/webhook", async (req, res) => {
       console.log("✅ Contact created in Salesforce:", sfContactId);
     }
 
-    // 🔁 Write Salesforce ID back to HL
-    try {
-      await axios.put(
-        `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
-        {
-          customFields: [
-            {
-              id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field in HL
-              field_value: sfContactId
-            }
-          ]
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${HL_API_KEY}`,
-            Version: "2021-07-28",
-            "Content-Type": "application/json"
+    // 🔁 Write SF ID back to HighLevel
+    await axios.put(
+      `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
+      {
+        customFields: [
+          {
+            id: "0w8kYzW7XY8L0rRwxEHA",
+            field_value: sfContactId
           }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${HL_API_KEY}`,
+          Version: "2021-07-28",
+          "Content-Type": "application/json"
         }
-      );
+      }
+    );
 
-      console.log("🔁 Salesforce ID written back to HighLevel");
-    } catch (hlUpdateError) {
-      console.log("⚠️ Could not update HL with SF ID");
-      console.log(hlUpdateError.response?.data || hlUpdateError.message);
-    }
+    console.log("🔁 Salesforce ID written back to HighLevel");
 
     res.status(200).json({ success: true });
 
@@ -179,9 +147,7 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    // 🛑 Prevent loop
     if (sfData.Origin_From_HL_c__c === true) {
-      console.log("⏭ Skipped — Originated from HL");
       return res.status(200).json({ skipped: "Originated from HL" });
     }
 
@@ -208,7 +174,6 @@ app.post("/sf-webhook", async (req, res) => {
     );
 
     const hlContactId = hlResponse.data.contact.id;
-    console.log("✅ Sent to HighLevel:", hlContactId);
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -237,7 +202,6 @@ app.post("/sf-webhook", async (req, res) => {
   }
 });
 
-// =======================
 app.listen(3000, () => {
   console.log("🚀 Server running on port 3000");
 });
