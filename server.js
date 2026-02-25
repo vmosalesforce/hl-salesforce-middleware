@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // =====================================
-// Health Check Route (Required)
+// Health Check Route
 // =====================================
 app.get("/", (req, res) => {
   res.status(200).send("Middleware is running");
@@ -41,7 +41,7 @@ async function refreshAccessToken() {
   );
 
   accessToken = response.data.access_token;
-  tokenExpiry = Date.now() + 1000 * 60 * 90;
+  tokenExpiry = Date.now() + 1000 * 60 * 90; // 90 minutes
 
   console.log("🔄 Refreshed Salesforce token");
 }
@@ -81,7 +81,7 @@ app.post("/webhook", async (req, res) => {
       lastName = "Unknown";
     }
 
-    // 🔥 UPSERT by External ID (Prevents duplicates)
+    // 🔥 UPSERT by External ID (prevents duplicates)
     await axios.patch(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/High_Level_ID__c/${hlId}`,
       {
@@ -89,7 +89,6 @@ app.post("/webhook", async (req, res) => {
         LastName: lastName,
         Email: hlData.Email || hlData.email,
         Phone: hlData.Phone || hlData.phone,
-        High_Level_ID__c: hlId,
         High_Level__c: true
       },
       {
@@ -115,7 +114,7 @@ app.post("/sf-webhook", async (req, res) => {
   try {
     const sfData = req.body;
 
-    // Prevent loop
+    // Prevent loop (don’t resend HL-originated records)
     if (sfData.High_Level__c === true) {
       return res.status(200).json({
         skipped: "Originated from HighLevel"
@@ -138,7 +137,7 @@ app.post("/sf-webhook", async (req, res) => {
         phone: sfData.Phone,
         customFields: [
           {
-            id: "0w8kYzW7XY8L0rRwxEHA",
+            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field in HL
             field_value: sfData.Id
           }
         ]
