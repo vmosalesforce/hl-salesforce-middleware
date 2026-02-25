@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 // =======================
-// Environment Variables
+// ENV VARIABLES
 // =======================
 const {
   SF_CLIENT_ID,
@@ -20,14 +20,14 @@ let accessToken = null;
 let tokenExpiry = 0;
 
 // =======================
-// Health Check Route
+// HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
   res.status(200).send("🚀 HL ↔ SF Middleware Running");
 });
 
 // =======================
-// Refresh Salesforce Token
+// REFRESH SF TOKEN
 // =======================
 async function refreshAccessToken() {
   const response = await axios.post(
@@ -50,7 +50,7 @@ async function refreshAccessToken() {
 }
 
 // =======================
-// HighLevel ➜ Salesforce
+// HL ➜ SF
 // =======================
 app.post("/webhook", async (req, res) => {
   try {
@@ -80,7 +80,7 @@ app.post("/webhook", async (req, res) => {
 
     let sfContactId;
 
-    // 🔎 Check if already exists by HL ID
+    // 🔎 Check if contact already exists by HL ID
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -93,7 +93,7 @@ app.post("/webhook", async (req, res) => {
 
     if (query.data.records.length > 0) {
       sfContactId = query.data.records[0].Id;
-      console.log("⏭ Existing Salesforce contact found:", sfContactId);
+      console.log("⏭ Existing SF contact found:", sfContactId);
     } else {
       const sfResponse = await axios.post(
         `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
@@ -103,7 +103,7 @@ app.post("/webhook", async (req, res) => {
           Email: hlData.Email || hlData.email,
           Phone: hlData.Phone || hlData.phone,
           High_Level_ID__c: hlData.id,
-          Origin_From_HL_c: true
+          Origin_From_HL_c__c: true
         },
         {
           headers: {
@@ -117,13 +117,13 @@ app.post("/webhook", async (req, res) => {
       console.log("✅ Contact created in Salesforce:", sfContactId);
     }
 
-    // 🔁 Write Salesforce ID back to HighLevel
+    // 🔁 Write SF ID back to HighLevel
     await axios.put(
       `https://services.leadconnectorhq.com/contacts/${hlData.id}`,
       {
         customFields: [
           {
-            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID field in HL
+            id: "0w8kYzW7XY8L0rRwxEHA", // SF Contact ID custom field in HL
             field_value: sfContactId
           }
         ]
@@ -148,7 +148,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // =======================
-// Salesforce ➜ HighLevel
+// SF ➜ HL
 // =======================
 app.post("/sf-webhook", async (req, res) => {
   try {
@@ -156,8 +156,8 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    // Prevent loop (skip if originated from HL)
-    if (sfData.Origin_From_HL_c === true) {
+    // 🛑 Prevent loop
+    if (sfData.Origin_From_HL_c__c === true) {
       console.log("⏭ Skipped — Originated from HL");
       return res.status(200).json({ skipped: "Originated from HL" });
     }
@@ -194,6 +194,7 @@ app.post("/sf-webhook", async (req, res) => {
       await refreshAccessToken();
     }
 
+    // 🔁 Write HL ID back to Salesforce
     await axios.patch(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
