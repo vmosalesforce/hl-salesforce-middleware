@@ -8,7 +8,9 @@ const {
   SF_CLIENT_ID,
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
-  SF_INSTANCE_URL
+  SF_INSTANCE_URL,
+  HL_API_KEY,
+  HL_LOCATION_ID
 } = process.env;
 
 let accessToken = null;
@@ -18,7 +20,7 @@ let tokenExpiry = 0;
 // HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 HL ➜ SF Middleware Running");
+  res.status(200).send("🚀 HL ↔ SF Middleware Running");
 });
 
 // =======================
@@ -44,9 +46,9 @@ async function refreshAccessToken() {
   console.log("🔄 Salesforce token refreshed");
 }
 
-// =======================
+// ======================================================
 // HL ➜ SF
-// =======================
+// ======================================================
 app.post("/webhook", async (req, res) => {
   try {
     console.log("📩 HL ➜ SF received");
@@ -56,7 +58,6 @@ app.post("/webhook", async (req, res) => {
     }
 
     const hlData = req.body;
-
     const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
@@ -64,12 +65,7 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ skipped: "Missing HL ID" });
     }
 
-    const firstName = hlData.FirstName || "";
-    const lastName = hlData.LastName || "Unknown";
-    const email = hlData.Email || null;
-    const phone = hlData.Phone || null;
-
-    // 🔎 Check if contact already exists
+    // Check if already exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -85,14 +81,13 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
-    // ✅ Create Contact
     const sfResponse = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
-        FirstName: firstName,
-        LastName: lastName,
-        Email: email,
-        Phone: phone,
+        FirstName: hlData.FirstName || "",
+        LastName: hlData.LastName || "Unknown",
+        Email: hlData.Email || null,
+        Phone: hlData.Phone || null,
         High_Level_ID__c: hlContactId,
         Origin_From_HL_c__c: true
       },
@@ -111,6 +106,55 @@ app.post("/webhook", async (req, res) => {
   } catch (error) {
     console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
     res.status(500).json({ error: "Salesforce call failed" });
+  }
+});
+
+// ======================================================
+// SF ➜ HL
+// ======================================================
+app.post("/sf-webhook", async (req, res) => {
+  try {
+    console.log("📩 SF ➜ HL received");
+
+    const sfData = req.body;
+
+    if (!sfData.Email && !sfData.Phone) {
+      return res.status(400).json({
+        error: "Email or Phone required"
+      });
+    }
+
+    const hlResponse = await axios.post(
+      "https://services.leadconnectorhq.com/contacts/upsert",
+      {
+        locationId: HL_LOCATION_ID,
+        firstName: sfData.FirstName,
+        lastName: sfData.LastName,
+        email: sfData.Email,
+        phone: sfData.Phone,
+        customFields: [
+          {
+            id: "0w8kYzW7XY8L0rRwxEHA", // Your SF Contact ID field in HL
+            field_value: sfData.Id
+          }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${HL_API_KEY}`,
+          Version: "2021-07-28",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    console.log("✅ Sent to HighLevel:", hlResponse.data.contact?.id);
+
+    res.status(200).json({ success: true });
+
+  } catch (error) {
+    console.error("❌ SF ➜ HL Error:", error.response?.data || error.message);
+    res.status(500).json({ error: "HighLevel call failed" });
   }
 });
 
