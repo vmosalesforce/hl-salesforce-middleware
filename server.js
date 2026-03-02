@@ -9,10 +9,10 @@ const {
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
-  HL_API_KEY,                     // XO Marriage HL token
-  HL_LOCATION_ID,                 // XO Marriage HL location
-  HL_MARKETING_API_KEY,           // XO Marketing token
-  HL_MARKETING_LOCATION_ID        // XO Marketing location
+  HL_API_KEY,                   // XO Marriage PIT
+  HL_LOCATION_ID,
+  HL_MARKETING_API_KEY,         // XO Marketing PIT
+  HL_MARKETING_LOCATION_ID
 } = process.env;
 
 let accessToken = null;
@@ -22,7 +22,7 @@ let tokenExpiry = 0;
 // HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 HL ↔ SF ↔ XO Marketing Middleware Running");
+  res.status(200).send("🚀 Middleware Running (PIT Mode)");
 });
 
 // =======================
@@ -47,7 +47,7 @@ async function refreshAccessToken() {
 }
 
 // ======================================================
-// ROUTE A: HL ➜ SF ➜ XO MARKETING
+// ROUTE 1: HL (XO Marriage) ➜ SF ➜ XO Marketing
 // ======================================================
 app.post("/webhook", async (req, res) => {
   try {
@@ -61,6 +61,7 @@ app.post("/webhook", async (req, res) => {
     const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
+      console.log("⚠️ Missing High_Level_ID__c");
       return res.status(200).json({ skipped: "Missing HL ID" });
     }
 
@@ -69,7 +70,7 @@ app.post("/webhook", async (req, res) => {
     const email = hlData.Email || null;
     const phone = hlData.Phone || null;
 
-    // Check if SF contact exists
+    // 🔎 Check if SF contact exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -84,13 +85,14 @@ app.post("/webhook", async (req, res) => {
     );
 
     let sfContactId;
-    let marketingAlreadyLinked = false;
+    let marketingLinked = false;
 
     if (query.data.records.length > 0) {
       sfContactId = query.data.records[0].Id;
-      marketingAlreadyLinked =
+      marketingLinked =
         !!query.data.records[0].XO_Marketing_High_Level_ID__c;
-      console.log("⏭ Existing SF contact found:", sfContactId);
+
+      console.log("⏭ Existing SF contact:", sfContactId);
     } else {
       const create = await axios.post(
         `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
@@ -109,30 +111,25 @@ app.post("/webhook", async (req, res) => {
           }
         }
       );
+
       sfContactId = create.data.id;
       console.log("✅ Created in Salesforce:", sfContactId);
     }
 
-    if (!marketingAlreadyLinked) {
-      await sendToMarketing(
-        firstName,
-        lastName,
-        email,
-        phone,
-        sfContactId
-      );
+    if (!marketingLinked) {
+      await sendToMarketing(firstName, lastName, email, phone, sfContactId);
     }
 
     res.status(200).json({ success: true });
 
   } catch (error) {
     console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Middleware failed" });
+    res.status(500).json({ error: "HL ➜ SF failed" });
   }
 });
 
 // ======================================================
-// ROUTE B: ORGANIC SF ➜ XO MARKETING
+// ROUTE 2: ORGANIC SF ➜ XO MARKETING
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
   try {
@@ -144,20 +141,18 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    // 🔒 Skip HL-originated contacts
     if (sfData.Origin_From_HL_c__c === true) {
-      console.log("⏭ Skipping HL-originated record");
+      console.log("⏭ Skipping HL-originated contact");
       return res.status(200).json({ skipped: "HL origin" });
+    }
+
+    if (sfData.XO_Marketing_High_Level_ID__c) {
+      console.log("⏭ Already linked to Marketing");
+      return res.status(200).json({ skipped: "Already linked" });
     }
 
     if (!sfData.Email && !sfData.Phone) {
       return res.status(400).json({ error: "Email or Phone required" });
-    }
-
-    // Skip if already linked
-    if (sfData.XO_Marketing_High_Level_ID__c) {
-      console.log("⏭ Already linked to Marketing");
-      return res.status(200).json({ skipped: "Already linked" });
     }
 
     await sendToMarketing(
@@ -172,7 +167,7 @@ app.post("/sf-webhook", async (req, res) => {
 
   } catch (error) {
     console.error("❌ SF ➜ Marketing Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Middleware failed" });
+    res.status(500).json({ error: "SF ➜ Marketing failed" });
   }
 });
 
@@ -184,24 +179,20 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
   console.log("📤 Sending to XO Marketing");
 
   const marketingResponse = await axios.post(
-    "https://services.leadconnectorhq.com/contacts/upsert",
+    "https://rest.gohighlevel.com/v1/contacts/",
     {
       locationId: HL_MARKETING_LOCATION_ID,
       firstName,
       lastName,
       email,
       phone,
-      customFields: [
-        {
-          key: "salesforce_contact_id",
-          field_value: sfContactId
-        }
-      ]
+      customField: {
+        salesforce_contact_id: sfContactId
+      }
     },
     {
       headers: {
         Authorization: `Bearer ${HL_MARKETING_API_KEY}`,
-        Version: "2021-07-28",
         "Content-Type": "application/json"
       }
     }
