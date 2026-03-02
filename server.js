@@ -10,9 +10,7 @@ const {
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
   HL_API_KEY,                   // XO Marriage PIT
-  HL_LOCATION_ID,
-  HL_MARKETING_API_KEY,         // XO Marketing PIT
-  HL_MARKETING_LOCATION_ID
+  HL_MARKETING_API_KEY          // XO Marketing PIT
 } = process.env;
 
 let accessToken = null;
@@ -22,7 +20,7 @@ let tokenExpiry = 0;
 // HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 Middleware Running (PIT Mode)");
+  res.status(200).send("🚀 HL ↔ SF ↔ XO Marketing Middleware Running");
 });
 
 // =======================
@@ -70,7 +68,7 @@ app.post("/webhook", async (req, res) => {
     const email = hlData.Email || null;
     const phone = hlData.Phone || null;
 
-    // 🔎 Check if SF contact exists
+    // 🔎 Check if SF contact already exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -141,11 +139,13 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
+    // 🛑 Skip HL-originated contacts
     if (sfData.Origin_From_HL_c__c === true) {
       console.log("⏭ Skipping HL-originated contact");
       return res.status(200).json({ skipped: "HL origin" });
     }
 
+    // 🛑 Skip if already linked
     if (sfData.XO_Marketing_High_Level_ID__c) {
       console.log("⏭ Already linked to Marketing");
       return res.status(200).json({ skipped: "Already linked" });
@@ -181,14 +181,16 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
   const marketingResponse = await axios.post(
     "https://rest.gohighlevel.com/v1/contacts/",
     {
-      locationId: HL_MARKETING_LOCATION_ID,
       firstName,
       lastName,
       email,
       phone,
-      customField: {
-        salesforce_contact_id: sfContactId
-      }
+      customField: [
+        {
+          key: "salesforce_contact_id",
+          value: sfContactId
+        }
+      ]
     },
     {
       headers: {
@@ -202,6 +204,7 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
 
   console.log("✅ XO Marketing ID:", marketingId);
 
+  // 🔁 Write Marketing ID back to Salesforce
   await axios.patch(
     `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
     {
