@@ -15,16 +15,10 @@ const {
 let accessToken = null;
 let tokenExpiry = 0;
 
-// =======================
-// HEALTH CHECK
-// =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 Middleware Running - Rate Safe Version");
+  res.status(200).send("🚀 Middleware Running - Final Stable Version");
 });
 
-// =======================
-// REFRESH SALESFORCE TOKEN
-// =======================
 async function refreshAccessToken() {
   const response = await axios.post(
     "https://login.salesforce.com/services/oauth2/token",
@@ -39,13 +33,12 @@ async function refreshAccessToken() {
 
   accessToken = response.data.access_token;
   tokenExpiry = Date.now() + 1000 * 60 * 90;
-
   console.log("🔄 Salesforce token refreshed");
 }
 
-// =======================
+// ======================================================
 // HL ➜ SF ➜ XO MARKETING
-// =======================
+// ======================================================
 app.post("/webhook", async (req, res) => {
   try {
     console.log("📩 HL ➜ SF received");
@@ -121,18 +114,16 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// =======================
-// SAFE MARKETING SEND
-// =======================
+// ======================================================
+// SAFE MARKETING SEND (ONE RETRY MAX)
+// ======================================================
 async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
 
   console.log("📤 Sending to XO Marketing");
 
-  // 🔒 HARD DELAY
   await new Promise(resolve => setTimeout(resolve, 3000));
 
   try {
-
     const create = await axios.post(
       "https://rest.gohighlevel.com/v1/contacts/",
       {
@@ -174,19 +165,56 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
   } catch (err) {
 
     if (err.response?.status === 429) {
-      console.log("⚠️ Rate limited — retrying once in 5 seconds");
+      console.log("⚠️ Rate limited — one retry in 5 seconds");
 
       await new Promise(resolve => setTimeout(resolve, 5000));
 
-      return sendToMarketing(firstName, lastName, email, phone, sfContactId);
-    }
+      try {
+        const retry = await axios.post(
+          "https://rest.gohighlevel.com/v1/contacts/",
+          {
+            firstName,
+            lastName,
+            email,
+            phone,
+            customField: [
+              {
+                key: "salesforce_contact_id",
+                value: sfContactId
+              }
+            ]
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${HL_MARKETING_API_KEY}`,
+              "Content-Type": "application/json"
+            }
+          }
+        );
 
-    if (err.response?.data?.message?.includes("already exists")) {
-      console.log("⏭ Marketing contact already exists");
+        const marketingId = retry.data.contact.id;
+
+        await axios.patch(
+          `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
+          { XO_Marketing_High_Level_ID__c: marketingId },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json"
+            }
+          }
+        );
+
+        console.log("✅ Retry succeeded");
+
+      } catch (retryErr) {
+        console.log("❌ Retry failed — stopping attempts");
+      }
+
       return;
     }
 
-    throw err;
+    console.log("❌ Marketing error:", err.response?.data || err.message);
   }
 }
 
