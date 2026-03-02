@@ -19,7 +19,7 @@ let tokenExpiry = 0;
 // HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 HL ↔ SF ↔ XO Marketing Middleware Running");
+  res.status(200).send("🚀 Middleware Running - Stable Mode");
 });
 
 // =======================
@@ -44,7 +44,7 @@ async function refreshAccessToken() {
 }
 
 // ======================================================
-// ROUTE 1: HL (XO Marriage) ➜ SF ➜ XO Marketing
+// ROUTE 1: HL ➜ SF ➜ XO Marketing
 // ======================================================
 app.post("/webhook", async (req, res) => {
   try {
@@ -58,7 +58,6 @@ app.post("/webhook", async (req, res) => {
     const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
-      console.log("⚠️ Missing High_Level_ID__c");
       return res.status(200).json({ skipped: "Missing HL ID" });
     }
 
@@ -67,7 +66,7 @@ app.post("/webhook", async (req, res) => {
     const email = hlData.Email || null;
     const phone = hlData.Phone || null;
 
-    // 🔎 Check if SF contact already exists
+    // 🔎 Check Salesforce for existing contact
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -86,9 +85,7 @@ app.post("/webhook", async (req, res) => {
 
     if (query.data.records.length > 0) {
       sfContactId = query.data.records[0].Id;
-      marketingLinked =
-        !!query.data.records[0].XO_Marketing_High_Level_ID__c;
-
+      marketingLinked = !!query.data.records[0].XO_Marketing_High_Level_ID__c;
       console.log("⏭ Existing SF contact:", sfContactId);
     } else {
       const create = await axios.post(
@@ -138,13 +135,12 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    // 🛑 Prevent double-send from HL-originated contacts
+    // Prevent HL-originated contacts from double sending
     if (sfData.High_Level_ID__c) {
-      console.log("⏭ Skipping — contact originated from HL");
+      console.log("⏭ Skipping HL-originated contact");
       return res.status(200).json({ skipped: "HL origin" });
     }
 
-    // 🛑 Skip if already linked
     if (sfData.XO_Marketing_High_Level_ID__c) {
       console.log("⏭ Already linked to Marketing");
       return res.status(200).json({ skipped: "Already linked" });
@@ -171,42 +167,61 @@ app.post("/sf-webhook", async (req, res) => {
 });
 
 // ======================================================
-// SHARED FUNCTION: SEND TO XO MARKETING + WRITEBACK
+// SEND TO XO MARKETING (Search Before Create)
 // ======================================================
 async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
 
-  console.log("📤 Sending to XO Marketing");
+  console.log("📤 Checking XO Marketing");
 
-  // Small delay to avoid burst rate limits
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await new Promise(resolve => setTimeout(resolve, 800));
 
-  const marketingResponse = await axios.post(
-    "https://rest.gohighlevel.com/v1/contacts/",
-    {
-      firstName,
-      lastName,
-      email,
-      phone,
-      customField: [
-        {
-          key: "salesforce_contact_id",
-          value: sfContactId
-        }
-      ]
-    },
+  let marketingId;
+
+  // 🔎 Step 1: Search by email
+  const search = await axios.get(
+    "https://rest.gohighlevel.com/v1/contacts/search",
     {
       headers: {
         Authorization: `Bearer ${HL_MARKETING_API_KEY}`,
         "Content-Type": "application/json"
-      }
+      },
+      params: { email }
     }
   );
 
-  const marketingId = marketingResponse.data.contact.id;
+  if (search.data.contacts && search.data.contacts.length > 0) {
+    marketingId = search.data.contacts[0].id;
+    console.log("⏭ Marketing contact exists:", marketingId);
+  } else {
+    console.log("➕ Creating new Marketing contact");
 
-  console.log("✅ XO Marketing ID:", marketingId);
+    const create = await axios.post(
+      "https://rest.gohighlevel.com/v1/contacts/",
+      {
+        firstName,
+        lastName,
+        email,
+        phone,
+        customField: [
+          {
+            key: "salesforce_contact_id",
+            value: sfContactId
+          }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${HL_MARKETING_API_KEY}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
 
-  // 🔁 Write Marketing ID back to Salesforce
+    marketingId = create.data.contact.id;
+    console.log("✅ XO Marketing ID:", marketingId);
+  }
+
+  // 🔁 Write back to Salesforce
   await axios.patch(
     `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
     {
