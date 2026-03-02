@@ -9,8 +9,7 @@ const {
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
-  HL_API_KEY,                   // XO Marriage PIT
-  HL_MARKETING_API_KEY          // XO Marketing PIT
+  HL_MARKETING_API_KEY
 } = process.env;
 
 let accessToken = null;
@@ -139,9 +138,9 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    // 🛑 Skip HL-originated contacts
-    if (sfData.Origin_From_HL_c__c === true) {
-      console.log("⏭ Skipping HL-originated contact");
+    // 🛑 Prevent double-send from HL-originated contacts
+    if (sfData.High_Level_ID__c) {
+      console.log("⏭ Skipping — contact originated from HL");
       return res.status(200).json({ skipped: "HL origin" });
     }
 
@@ -177,6 +176,9 @@ app.post("/sf-webhook", async (req, res) => {
 async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
 
   console.log("📤 Sending to XO Marketing");
+
+  // Small delay to avoid burst rate limits
+  await new Promise(resolve => setTimeout(resolve, 500));
 
   const marketingResponse = await axios.post(
     "https://rest.gohighlevel.com/v1/contacts/",
