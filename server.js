@@ -15,10 +15,16 @@ const {
 let accessToken = null;
 let tokenExpiry = 0;
 
+// =======================
+// HEALTH CHECK
+// =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 Middleware Running - Final Stable Version");
+  res.status(200).send("🚀 Middleware Running - Final Stable Build");
 });
 
+// =======================
+// REFRESH SALESFORCE TOKEN
+// =======================
 async function refreshAccessToken() {
   const response = await axios.post(
     "https://login.salesforce.com/services/oauth2/token",
@@ -33,6 +39,7 @@ async function refreshAccessToken() {
 
   accessToken = response.data.access_token;
   tokenExpiry = Date.now() + 1000 * 60 * 90;
+
   console.log("🔄 Salesforce token refreshed");
 }
 
@@ -59,63 +66,64 @@ app.post("/webhook", async (req, res) => {
     const email = hlData.Email || null;
     const phone = hlData.Phone || null;
 
+    // 🔎 Check if SF contact already exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
         params: {
-          q: `SELECT Id, XO_Marketing_High_Level_ID__c
-              FROM Contact
-              WHERE High_Level_ID__c = '${hlContactId}'
-              LIMIT 1`
+          q: `SELECT Id FROM Contact WHERE High_Level_ID__c = '${hlContactId}' LIMIT 1`
         }
       }
     );
 
-    let sfContactId;
-    let marketingLinked = false;
-
+    // =========================================
+    // IF CONTACT ALREADY EXISTS → STOP
+    // =========================================
     if (query.data.records.length > 0) {
-      sfContactId = query.data.records[0].Id;
-      marketingLinked = !!query.data.records[0].XO_Marketing_High_Level_ID__c;
-      console.log("⏭ Existing SF contact:", sfContactId);
-    } else {
-      const create = await axios.post(
-        `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
-        {
-          FirstName: firstName,
-          LastName: lastName,
-          Email: email,
-          Phone: phone,
-          High_Level_ID__c: hlContactId,
-          Origin_From_HL_c__c: true
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
-          }
+      console.log("⏭ Existing SF contact — skipping Marketing");
+      return res.status(200).json({ success: true });
+    }
+
+    // =========================================
+    // CREATE SALESFORCE CONTACT
+    // =========================================
+    const create = await axios.post(
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
+      {
+        FirstName: firstName,
+        LastName: lastName,
+        Email: email,
+        Phone: phone,
+        High_Level_ID__c: hlContactId,
+        Origin_From_HL_c__c: true
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
         }
-      );
+      }
+    );
 
-      sfContactId = create.data.id;
-      console.log("✅ Created in Salesforce:", sfContactId);
-    }
+    const sfContactId = create.data.id;
+    console.log("✅ Created in Salesforce:", sfContactId);
 
-    if (!marketingLinked) {
-      await sendToMarketing(firstName, lastName, email, phone, sfContactId);
-    }
+    // =========================================
+    // SEND TO XO MARKETING (ONE ATTEMPT + ONE RETRY)
+    // =========================================
+    await sendToMarketing(firstName, lastName, email, phone, sfContactId);
 
-    res.status(200).json({ success: true });
+    return res.status(200).json({ success: true });
 
   } catch (error) {
     console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "HL ➜ SF failed" });
+    return res.status(200).json({ handled: true }); // always return 200 so HL stops retrying
   }
 });
 
 // ======================================================
-// SAFE MARKETING SEND (ONE RETRY MAX)
+// SAFE MARKETING SEND
 // ======================================================
 async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
 
@@ -124,6 +132,7 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
   await new Promise(resolve => setTimeout(resolve, 3000));
 
   try {
+
     const create = await axios.post(
       "https://rest.gohighlevel.com/v1/contacts/",
       {
@@ -170,7 +179,7 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
       await new Promise(resolve => setTimeout(resolve, 5000));
 
       try {
-        const retry = await axios.post(
+        await axios.post(
           "https://rest.gohighlevel.com/v1/contacts/",
           {
             firstName,
@@ -192,23 +201,10 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
           }
         );
 
-        const marketingId = retry.data.contact.id;
-
-        await axios.patch(
-          `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
-          { XO_Marketing_High_Level_ID__c: marketingId },
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json"
-            }
-          }
-        );
-
         console.log("✅ Retry succeeded");
 
       } catch (retryErr) {
-        console.log("❌ Retry failed — stopping attempts");
+        console.log("❌ Retry failed — stopping");
       }
 
       return;
