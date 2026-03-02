@@ -19,7 +19,7 @@ let tokenExpiry = 0;
 // HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 Middleware Running - Stable Mode");
+  res.status(200).send("🚀 Middleware Running - Stable Version");
 });
 
 // =======================
@@ -66,7 +66,7 @@ app.post("/webhook", async (req, res) => {
     const email = hlData.Email || null;
     const phone = hlData.Phone || null;
 
-    // 🔎 Check Salesforce for existing contact
+    // 🔎 Check Salesforce
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -135,12 +135,13 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    // Prevent HL-originated contacts from double sending
+    // Prevent HL-originated contacts from double send
     if (sfData.High_Level_ID__c) {
       console.log("⏭ Skipping HL-originated contact");
       return res.status(200).json({ skipped: "HL origin" });
     }
 
+    // Skip if already linked
     if (sfData.XO_Marketing_High_Level_ID__c) {
       console.log("⏭ Already linked to Marketing");
       return res.status(200).json({ skipped: "Already linked" });
@@ -167,34 +168,17 @@ app.post("/sf-webhook", async (req, res) => {
 });
 
 // ======================================================
-// SEND TO XO MARKETING (Search Before Create)
+// SEND TO XO MARKETING (Create-first, search-if-needed)
 // ======================================================
 async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
 
-  console.log("📤 Checking XO Marketing");
+  console.log("📤 Sending to XO Marketing");
 
-  await new Promise(resolve => setTimeout(resolve, 800));
+  await new Promise(resolve => setTimeout(resolve, 1200));
 
   let marketingId;
 
-  // 🔎 Step 1: Search by email
-  const search = await axios.get(
-    "https://rest.gohighlevel.com/v1/contacts/search",
-    {
-      headers: {
-        Authorization: `Bearer ${HL_MARKETING_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      params: { email }
-    }
-  );
-
-  if (search.data.contacts && search.data.contacts.length > 0) {
-    marketingId = search.data.contacts[0].id;
-    console.log("⏭ Marketing contact exists:", marketingId);
-  } else {
-    console.log("➕ Creating new Marketing contact");
-
+  try {
     const create = await axios.post(
       "https://rest.gohighlevel.com/v1/contacts/",
       {
@@ -218,10 +202,39 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
     );
 
     marketingId = create.data.contact.id;
-    console.log("✅ XO Marketing ID:", marketingId);
+    console.log("✅ Created Marketing contact:", marketingId);
+
+  } catch (err) {
+
+    if (err.response?.data?.message?.includes("already exists")) {
+
+      console.log("⏭ Marketing contact already exists — fetching");
+
+      const search = await axios.get(
+        "https://rest.gohighlevel.com/v1/contacts/search",
+        {
+          headers: {
+            Authorization: `Bearer ${HL_MARKETING_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          params: { email }
+        }
+      );
+
+      if (search.data.contacts && search.data.contacts.length > 0) {
+        marketingId = search.data.contacts[0].id;
+      }
+
+    } else {
+      throw err;
+    }
   }
 
-  // 🔁 Write back to Salesforce
+  if (!marketingId) {
+    console.log("⚠️ No Marketing ID found");
+    return;
+  }
+
   await axios.patch(
     `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
     {
