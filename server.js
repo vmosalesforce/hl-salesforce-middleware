@@ -19,7 +19,7 @@ let tokenExpiry = 0;
 // HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 Middleware Running - Final Stable Build");
+  res.status(200).send("🚀 Middleware Running - LeadConnector Version");
 });
 
 // =======================
@@ -58,7 +58,7 @@ app.post("/webhook", async (req, res) => {
     const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
-      return res.status(200).json({ skipped: "Missing HL ID" });
+      return res.status(200).json({ skipped: true });
     }
 
     const firstName = hlData.FirstName || "";
@@ -77,17 +77,13 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    // =========================================
-    // IF CONTACT ALREADY EXISTS → STOP
-    // =========================================
+    // If contact exists, STOP (prevents replay storm)
     if (query.data.records.length > 0) {
       console.log("⏭ Existing SF contact — skipping Marketing");
       return res.status(200).json({ success: true });
     }
 
-    // =========================================
-    // CREATE SALESFORCE CONTACT
-    // =========================================
+    // Create Salesforce Contact
     const create = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
@@ -109,38 +105,37 @@ app.post("/webhook", async (req, res) => {
     const sfContactId = create.data.id;
     console.log("✅ Created in Salesforce:", sfContactId);
 
-    // =========================================
-    // SEND TO XO MARKETING (ONE ATTEMPT + ONE RETRY)
-    // =========================================
+    // Send to XO Marketing
     await sendToMarketing(firstName, lastName, email, phone, sfContactId);
 
     return res.status(200).json({ success: true });
 
   } catch (error) {
     console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
-    return res.status(200).json({ handled: true }); // always return 200 so HL stops retrying
+    return res.status(200).json({ handled: true }); // Always 200 to stop HL retries
   }
 });
 
 // ======================================================
-// SAFE MARKETING SEND
+// SEND TO XO MARKETING (LeadConnector API)
 // ======================================================
 async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
 
   console.log("📤 Sending to XO Marketing");
 
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  await new Promise(resolve => setTimeout(resolve, 2000));
 
   try {
 
     const create = await axios.post(
-      "https://rest.gohighlevel.com/v1/contacts/",
+      "https://services.leadconnectorhq.com/contacts/",
       {
+        locationId: "b14865bIx5lk78TWHm7n",
         firstName,
         lastName,
         email,
         phone,
-        customField: [
+        customFields: [
           {
             key: "salesforce_contact_id",
             value: sfContactId
@@ -150,6 +145,7 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
       {
         headers: {
           Authorization: `Bearer ${HL_MARKETING_API_KEY}`,
+          Version: "2021-07-28",
           "Content-Type": "application/json"
         }
       }
@@ -158,6 +154,7 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
     const marketingId = create.data.contact.id;
     console.log("✅ Created Marketing contact:", marketingId);
 
+    // Write Marketing ID back to Salesforce
     await axios.patch(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
       { XO_Marketing_High_Level_ID__c: marketingId },
@@ -172,44 +169,6 @@ async function sendToMarketing(firstName, lastName, email, phone, sfContactId) {
     console.log("🔁 Marketing ID written back to Salesforce");
 
   } catch (err) {
-
-    if (err.response?.status === 429) {
-      console.log("⚠️ Rate limited — one retry in 5 seconds");
-
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      try {
-        await axios.post(
-          "https://rest.gohighlevel.com/v1/contacts/",
-          {
-            firstName,
-            lastName,
-            email,
-            phone,
-            customField: [
-              {
-                key: "salesforce_contact_id",
-                value: sfContactId
-              }
-            ]
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${HL_MARKETING_API_KEY}`,
-              "Content-Type": "application/json"
-            }
-          }
-        );
-
-        console.log("✅ Retry succeeded");
-
-      } catch (retryErr) {
-        console.log("❌ Retry failed — stopping");
-      }
-
-      return;
-    }
-
     console.log("❌ Marketing error:", err.response?.data || err.message);
   }
 }
