@@ -35,9 +35,7 @@ async function refreshAccessToken() {
       client_secret: SF_CLIENT_SECRET,
       refresh_token: SF_REFRESH_TOKEN
     }),
-    {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" }
-    }
+    { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
   );
 
   accessToken = response.data.access_token;
@@ -61,11 +59,10 @@ app.post("/webhook", async (req, res) => {
     const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
-      console.log("⚠️ Missing High_Level_ID__c");
       return res.status(200).json({ skipped: true });
     }
 
-    // 🔎 Check if contact already exists in Salesforce
+    // Check if exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -77,12 +74,12 @@ app.post("/webhook", async (req, res) => {
     );
 
     if (query.data.records.length > 0) {
-      console.log("⏭ Existing SF contact found:", query.data.records[0].Id);
+      console.log("⏭ Existing SF contact found");
       return res.status(200).json({ success: true });
     }
 
-    // ✅ Create new Contact in Salesforce
-    const sfResponse = await axios.post(
+    // Create Contact
+    await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
         FirstName: hlData.FirstName || "",
@@ -100,8 +97,7 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    console.log("✅ Created in Salesforce:", sfResponse.data.id);
-
+    console.log("✅ Created in Salesforce");
     return res.status(200).json({ success: true });
 
   } catch (error) {
@@ -117,20 +113,27 @@ app.post("/sf-webhook", async (req, res) => {
   try {
     console.log("📩 SF ➜ XO Marketing received");
 
+    if (!accessToken || Date.now() > tokenExpiry) {
+      await refreshAccessToken();
+    }
+
     const sfData = req.body;
 
     if (!sfData.Email) {
-      console.log("⚠️ No email — cannot sync");
       return res.status(200).json({ skipped: true });
     }
 
-    if (sfData.Sent_to_High_Level__c === true) {
-      console.log("⏭ Already sent to Marketing");
-      return res.status(200).json({ skipped: true });
-    }
+    // 🔥 Query Salesforce to check origin
+    const originCheck = await axios.get(
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }
+    );
 
-    // 🔥 CORRECT ORIGIN LOGIC
-    const tagToApply = sfData.Origin_From_HL_c__c === true
+    const isFromHL = originCheck.data.Origin_From_HL_c__c === true;
+
+    const tagToApply = isFromHL
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
@@ -156,7 +159,6 @@ app.post("/sf-webhook", async (req, res) => {
     );
 
     console.log("✅ Upsert complete in XO Marketing");
-
     return res.status(200).json({ success: true });
 
   } catch (error) {
