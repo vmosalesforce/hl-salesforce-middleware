@@ -129,8 +129,8 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // Determine tag based on origin
-    const tagToApply = sfData.Origin_From_HL_c__c
+    // 🔥 SAFER TAG LOGIC (based on HL ID presence)
+    const tagToApply = sfData.High_Level_ID__c
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
