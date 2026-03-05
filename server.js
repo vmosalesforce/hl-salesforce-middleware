@@ -65,7 +65,7 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // Check if already exists
+    // 🔎 Check if contact already exists in Salesforce
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -81,7 +81,7 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
-    // Create new Contact in Salesforce
+    // ✅ Create new Contact in Salesforce
     const sfResponse = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
@@ -129,12 +129,12 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // 🔥 SAFER TAG LOGIC (based on HL ID presence)
-    const tagToApply = sfData.High_Level_ID__c
+    // 🔥 CORRECT ORIGIN LOGIC
+    const tagToApply = sfData.Origin_From_HL_c__c === true
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
-    console.log("📤 Upserting to XO Marketing with tag:", tagToApply);
+    console.log("📤 Sending to XO Marketing with tag:", tagToApply);
 
     await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
