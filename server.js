@@ -62,7 +62,6 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // Check if exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -78,7 +77,6 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
-    // Create Contact
     await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
@@ -123,47 +121,46 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // Query Salesforce to check origin + donor segment
-    const originCheck = await axios.get(
+    // Pull full contact from Salesforce
+    const sfContact = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
         headers: { Authorization: `Bearer ${accessToken}` }
       }
     );
 
-    const isFromHL = originCheck.data.Origin_From_HL_c__c === true;
-    const donorSegment = originCheck.data.HighLevel_Donor_Segments__c;
+    const contact = sfContact.data;
 
-    // Base tag (existing logic)
-    let tagToApply = isFromHL
-      ? ["HL Via Salesforce"]
-      : ["Organic Salesforce"];
+    const isFromHL = contact.Origin_From_HL_c__c === true;
+    const donorSegment = contact.HighLevel_Donor_Segments__c;
+    const shopifySegment = contact.Shopify_Segment__c;
 
-    // Add donor tier tag if present
-    if (donorSegment === "Mid Donor") {
-      tagToApply.push("SF Mid Donor");
-    }
-    if (donorSegment === "Low Donor") {
-      tagToApply.push("SF Low Donor");
-    }
-    if (donorSegment === "Non-Donor") {
-      tagToApply.push("SF Non-Donor");
-    }
-    if (donorSegment === "Major Donor") {
-      tagToApply.push("SF Major Donor");
+    let tags = [];
+
+    // Origin Tag
+    tags.push(isFromHL ? "HL Via Salesforce" : "Organic Salesforce");
+
+    // Donor Segment Tag
+    if (donorSegment && donorSegment !== "Non-Donor") {
+      tags.push(`SF Donor - ${donorSegment}`);
     }
 
-    console.log("📤 Sending to XO Marketing with tags:", tagToApply);
+    // Shopify Segment Tag
+    if (shopifySegment && shopifySegment !== "No Shopify") {
+      tags.push(`SF Shopify - ${shopifySegment}`);
+    }
+
+    console.log("📤 Sending to XO Marketing with tags:", tags);
 
     await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: HL_LOCATION_ID,
-        email: sfData.Email,
-        firstName: sfData.FirstName || "",
-        lastName: sfData.LastName || "Unknown",
-        phone: sfData.Phone || null,
-        tags: tagToApply
+        email: contact.Email,
+        firstName: contact.FirstName || "",
+        lastName: contact.LastName || "Unknown",
+        phone: contact.Phone || null,
+        tags: tags
       },
       {
         headers: {
