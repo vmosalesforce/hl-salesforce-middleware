@@ -62,7 +62,7 @@ app.post("/webhook", async (req, res) => {
 
     if (!hlContactId) {
       console.log("⚠️ Missing High_Level_ID__c");
-      return res.status(200).json({ skipped: "Missing HL ID" });
+      return res.status(200).json({ skipped: true });
     }
 
     // Check if already exists
@@ -81,6 +81,7 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
+    // Create new Contact in Salesforce
     const sfResponse = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
@@ -99,45 +100,51 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    console.log("✅ Contact created in Salesforce:", sfResponse.data.id);
+    console.log("✅ Created in Salesforce:", sfResponse.data.id);
 
-    res.status(200).json({ success: true });
+    return res.status(200).json({ success: true });
 
   } catch (error) {
     console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Salesforce call failed" });
+    return res.status(200).json({ handled: true });
   }
 });
 
 // ======================================================
-// SF ➜ HL
+// SF ➜ XO MARKETING
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
   try {
-    console.log("📩 SF ➜ HL received");
+    console.log("📩 SF ➜ XO Marketing received");
 
     const sfData = req.body;
 
-    if (!sfData.Email && !sfData.Phone) {
-      return res.status(400).json({
-        error: "Email or Phone required"
-      });
+    if (!sfData.Email) {
+      console.log("⚠️ No email — cannot sync");
+      return res.status(200).json({ skipped: true });
     }
 
-    const hlResponse = await axios.post(
+    if (sfData.Sent_to_High_Level__c === true) {
+      console.log("⏭ Already sent to Marketing");
+      return res.status(200).json({ skipped: true });
+    }
+
+    // Determine tag based on origin
+    const tagToApply = sfData.Origin_From_HL_c__c
+      ? ["HL Via Salesforce"]
+      : ["Organic Salesforce"];
+
+    console.log("📤 Upserting to XO Marketing with tag:", tagToApply);
+
+    await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: HL_LOCATION_ID,
-        firstName: sfData.FirstName,
-        lastName: sfData.LastName,
         email: sfData.Email,
-        phone: sfData.Phone,
-        customFields: [
-          {
-            id: "0w8kYzW7XY8L0rRwxEHA", // Your SF Contact ID field in HL
-            field_value: sfData.Id
-          }
-        ]
+        firstName: sfData.FirstName || "",
+        lastName: sfData.LastName || "Unknown",
+        phone: sfData.Phone || null,
+        tags: tagToApply
       },
       {
         headers: {
@@ -148,13 +155,13 @@ app.post("/sf-webhook", async (req, res) => {
       }
     );
 
-    console.log("✅ Sent to HighLevel:", hlResponse.data.contact?.id);
+    console.log("✅ Upsert complete in XO Marketing");
 
-    res.status(200).json({ success: true });
+    return res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error("❌ SF ➜ HL Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "HighLevel call failed" });
+    console.error("❌ SF ➜ Marketing Error:", error.response?.data || error.message);
+    return res.status(200).json({ handled: true });
   }
 });
 
