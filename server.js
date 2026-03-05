@@ -123,7 +123,7 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // 🔥 Query Salesforce to check origin
+    // Query Salesforce to check origin + donor segment
     const originCheck = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
@@ -132,12 +132,28 @@ app.post("/sf-webhook", async (req, res) => {
     );
 
     const isFromHL = originCheck.data.Origin_From_HL_c__c === true;
+    const donorSegment = originCheck.data.HighLevel_Donor_Segments__c;
 
-    const tagToApply = isFromHL
+    // Base tag (existing logic)
+    let tagToApply = isFromHL
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
-    console.log("📤 Sending to XO Marketing with tag:", tagToApply);
+    // Add donor tier tag if present
+    if (donorSegment === "Mid Donor") {
+      tagToApply.push("SF Mid Donor");
+    }
+    if (donorSegment === "Low Donor") {
+      tagToApply.push("SF Low Donor");
+    }
+    if (donorSegment === "Non-Donor") {
+      tagToApply.push("SF Non-Donor");
+    }
+    if (donorSegment === "Major Donor") {
+      tagToApply.push("SF Major Donor");
+    }
+
+    console.log("📤 Sending to XO Marketing with tags:", tagToApply);
 
     await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
