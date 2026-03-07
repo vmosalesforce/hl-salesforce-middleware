@@ -121,7 +121,6 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // Get full Salesforce Contact
     const originCheck = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
@@ -134,12 +133,10 @@ app.post("/sf-webhook", async (req, res) => {
     const isFromHL = contact.Origin_From_HL_c__c === true;
     const donorSegment = contact.HighLevel_Donor_Segments__c;
 
-    // Base origin tag
     let tagToApply = isFromHL
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
-    // Donor tier tags
     if (donorSegment === "Mid Donor") {
       tagToApply.push("SF Mid Donor");
     }
@@ -166,7 +163,7 @@ app.post("/sf-webhook", async (req, res) => {
         tags: tagToApply,
         customFields: [
           {
-            key: "contact.salesforce_contact_id",
+            id: "OgA23wE1DwCjXitTl41d",
             value: contact.Id
           }
         ]
