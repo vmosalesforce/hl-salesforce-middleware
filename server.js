@@ -62,7 +62,6 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // Check if exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -78,7 +77,6 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
-    // Create Contact
     await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
@@ -123,7 +121,7 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    // Query Salesforce to check origin + donor segment
+    // Get full Salesforce Contact
     const originCheck = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
@@ -131,15 +129,17 @@ app.post("/sf-webhook", async (req, res) => {
       }
     );
 
-    const isFromHL = originCheck.data.Origin_From_HL_c__c === true;
-    const donorSegment = originCheck.data.HighLevel_Donor_Segments__c;
+    const contact = originCheck.data;
 
-    // Base tag (existing logic)
+    const isFromHL = contact.Origin_From_HL_c__c === true;
+    const donorSegment = contact.HighLevel_Donor_Segments__c;
+
+    // Base origin tag
     let tagToApply = isFromHL
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
-    // Add donor tier tag if present
+    // Donor tier tags
     if (donorSegment === "Mid Donor") {
       tagToApply.push("SF Mid Donor");
     }
@@ -159,11 +159,17 @@ app.post("/sf-webhook", async (req, res) => {
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: HL_LOCATION_ID,
-        email: sfData.Email,
-        firstName: sfData.FirstName || "",
-        lastName: sfData.LastName || "Unknown",
-        phone: sfData.Phone || null,
-        tags: tagToApply
+        email: contact.Email,
+        firstName: contact.FirstName || "",
+        lastName: contact.LastName || "Unknown",
+        phone: contact.Phone || contact.HomePhone || null,
+        tags: tagToApply,
+        customFields: [
+          {
+            key: "contact.salesforce_contact_id",
+            value: contact.Id
+          }
+        ]
       },
       {
         headers: {
