@@ -62,6 +62,7 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
+    // Check if contact already exists
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -77,6 +78,7 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
+    // Create Contact in Salesforce
     await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
@@ -84,6 +86,7 @@ app.post("/webhook", async (req, res) => {
         LastName: hlData.LastName || "Unknown",
         Email: hlData.Email || null,
         Phone: hlData.Phone || null,
+        HomePhone: hlData.HomePhone || null,
         High_Level_ID__c: hlContactId,
         Origin_From_HL_c__c: true
       },
@@ -121,6 +124,7 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
+    // Get full Salesforce contact
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
@@ -133,6 +137,9 @@ app.post("/sf-webhook", async (req, res) => {
     const isFromHL = contact.Origin_From_HL_c__c === true;
     const donorSegment = contact.HighLevel_Donor_Segments__c;
 
+    // =======================
+    // BUILD TAGS
+    // =======================
     let tagToApply = isFromHL
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
@@ -142,7 +149,11 @@ app.post("/sf-webhook", async (req, res) => {
     if (donorSegment === "Non-Donor") tagToApply.push("SF Non-Donor");
     if (donorSegment === "Major Donor") tagToApply.push("SF Major Donor");
 
+    console.log("📤 Sending to XO Marketing with tags:", tagToApply);
+
+    // =======================
     // 1️⃣ UPSERT CONTACT
+    // =======================
     const hlUpsertResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
@@ -166,14 +177,16 @@ app.post("/sf-webhook", async (req, res) => {
 
     console.log("✅ HL Contact ID:", hlContactId);
 
-    // 2️⃣ PATCH CUSTOM FIELD (Guaranteed Write)
+    // =======================
+    // 2️⃣ WRITE SALESFORCE ID
+    // =======================
     if (hlContactId) {
       await axios.put(
         `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
         {
           customFields: [
             {
-              id: "OgA23wE1DwCjXitTl41d",
+              id: "0w8kYzW7XY8L0rRwxEHA", // CORRECT FIELD ID
               value: contact.Id
             }
           ]
