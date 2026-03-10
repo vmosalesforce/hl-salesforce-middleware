@@ -121,14 +121,14 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
-    const originCheck = await axios.get(
+    const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
         headers: { Authorization: `Bearer ${accessToken}` }
       }
     );
 
-    const contact = originCheck.data;
+    const contact = sfContactResponse.data;
 
     const isFromHL = contact.Origin_From_HL_c__c === true;
     const donorSegment = contact.HighLevel_Donor_Segments__c;
@@ -137,22 +137,13 @@ app.post("/sf-webhook", async (req, res) => {
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
-    if (donorSegment === "Mid Donor") {
-      tagToApply.push("SF Mid Donor");
-    }
-    if (donorSegment === "Low Donor") {
-      tagToApply.push("SF Low Donor");
-    }
-    if (donorSegment === "Non-Donor") {
-      tagToApply.push("SF Non-Donor");
-    }
-    if (donorSegment === "Major Donor") {
-      tagToApply.push("SF Major Donor");
-    }
+    if (donorSegment === "Mid Donor") tagToApply.push("SF Mid Donor");
+    if (donorSegment === "Low Donor") tagToApply.push("SF Low Donor");
+    if (donorSegment === "Non-Donor") tagToApply.push("SF Non-Donor");
+    if (donorSegment === "Major Donor") tagToApply.push("SF Major Donor");
 
-    console.log("📤 Sending to XO Marketing with tags:", tagToApply);
-
-    await axios.post(
+    // 1️⃣ UPSERT CONTACT
+    const hlUpsertResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: HL_LOCATION_ID,
@@ -160,24 +151,45 @@ app.post("/sf-webhook", async (req, res) => {
         firstName: contact.FirstName || "",
         lastName: contact.LastName || "Unknown",
         phone: contact.Phone || contact.HomePhone || null,
-        tags: tagToApply,
-        customFields: [
-          {
-            id: "OgA23wE1DwCjXitTl41d",
-            value: contact.Id
-          }
-        ]
+        tags: tagToApply
       },
       {
         headers: {
           Authorization: `Bearer ${HL_API_KEY}`,
-          Version: "2021-07-28",
+          Version: "2021-04-15",
           "Content-Type": "application/json"
         }
       }
     );
 
-    console.log("✅ Upsert complete in XO Marketing");
+    const hlContactId = hlUpsertResponse.data.contact?.id;
+
+    console.log("✅ HL Contact ID:", hlContactId);
+
+    // 2️⃣ PATCH CUSTOM FIELD (Guaranteed Write)
+    if (hlContactId) {
+      await axios.put(
+        `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
+        {
+          customFields: [
+            {
+              id: "OgA23wE1DwCjXitTl41d",
+              value: contact.Id
+            }
+          ]
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${HL_API_KEY}`,
+            Version: "2021-04-15",
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      console.log("✅ Salesforce ID written to HL");
+    }
+
     return res.status(200).json({ success: true });
 
   } catch (error) {
