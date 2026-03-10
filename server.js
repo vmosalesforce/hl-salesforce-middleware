@@ -20,16 +20,16 @@ const {
 let accessToken = null;
 let tokenExpiry = 0;
 
-// =======================
+// ======================================================
 // HEALTH CHECK
-// =======================
+// ======================================================
 app.get("/", (req, res) => {
   res.status(200).send("🚀 HL ↔ SF Middleware Running");
 });
 
-// =======================
+// ======================================================
 // REFRESH SALESFORCE TOKEN
-// =======================
+// ======================================================
 async function refreshAccessToken() {
   const response = await axios.post(
     "https://login.salesforce.com/services/oauth2/token",
@@ -49,7 +49,17 @@ async function refreshAccessToken() {
 }
 
 // ======================================================
-// SF ➜ HL (MARKETING OR MARRIAGE)
+// 🔁 ALIAS ROUTE (Backward Compatibility)
+// This allows Salesforce to keep calling /webhook
+// ======================================================
+app.post("/webhook", async (req, res) => {
+  console.log("📩 Alias route hit (/webhook)");
+  req.url = "/sf-webhook";
+  app._router.handle(req, res);
+});
+
+// ======================================================
+// SF ➜ HL (Marketing OR Marriage)
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
   try {
@@ -75,10 +85,11 @@ app.post("/sf-webhook", async (req, res) => {
 
     const contact = sfContactResponse.data;
 
-    // 🔎 Decide destination
-    // You can control this using a Salesforce field
-    const destination = contact.Send_to_HL_Location__c; 
-    // Example values: "Marketing" or "Marriage"
+    // ==================================================
+    // ROUTING LOGIC
+    // Uses Send_to_HL_Location__c on Contact
+    // ==================================================
+    const destination = contact.Send_to_HL_Location__c;
 
     let apiKey;
     let locationId;
@@ -87,18 +98,18 @@ app.post("/sf-webhook", async (req, res) => {
     if (destination === "Marriage") {
       apiKey = HL_MARRIAGE_API_KEY;
       locationId = HL_MARRIAGE_LOCATION_ID;
-      sfFieldId = "OgA23wE1DwCjXitTl41d"; // Marriage SF ID field
+      sfFieldId = "OgA23wE1DwCjXitTl41d"; // XO Marriage field ID
       console.log("➡ Sending to XO Marriage");
     } else {
       apiKey = HL_MARKETING_API_KEY;
       locationId = HL_MARKETING_LOCATION_ID;
-      sfFieldId = "0w8kYzW7XY8L0rRwxEHA"; // Marketing SF ID field
+      sfFieldId = "0w8kYzW7XY8L0rRwxEHA"; // XO Marketing field ID
       console.log("➡ Sending to XO Marketing");
     }
 
-    // =======================
-    // UPSERT CONTACT IN HL
-    // =======================
+    // ==================================================
+    // 1️⃣ UPSERT CONTACT IN HIGHLEVEL
+    // ==================================================
     const hlUpsertResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
@@ -118,12 +129,11 @@ app.post("/sf-webhook", async (req, res) => {
     );
 
     const hlContactId = hlUpsertResponse.data.contact?.id;
-
     console.log("✅ HL Contact ID:", hlContactId);
 
-    // =======================
-    // WRITE SF ID INTO HL
-    // =======================
+    // ==================================================
+    // 2️⃣ WRITE SALESFORCE ID INTO HL
+    // ==================================================
     if (hlContactId) {
       await axios.put(
         `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
@@ -155,6 +165,7 @@ app.post("/sf-webhook", async (req, res) => {
   }
 });
 
+// ======================================================
 app.listen(3000, () => {
   console.log("🚀 Server running on port 3000");
 });
