@@ -122,6 +122,7 @@ app.post("/sf-webhook", async (req, res) => {
       return res.status(200).json({ skipped: true });
     }
 
+    // Get full Salesforce contact
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
@@ -166,20 +167,19 @@ app.post("/sf-webhook", async (req, res) => {
     );
 
     const hlContactId = hlUpsertResponse.data.contact?.id;
-
     console.log("✅ HL Contact ID:", hlContactId);
 
     if (!hlContactId) {
       return res.status(200).json({ success: true });
     }
 
-    // 2️⃣ WRITE SF ID INTO HL
+    // 2️⃣ WRITE SF ID INTO HL (Correct Field ID)
     await axios.put(
       `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
       {
         customFields: [
           {
-            id: "0w8kYzW7XY8L0rRwxEHA",
+            id: "OgA23wE1DwCjXitTl41d",   // ✅ Correct XO Marketing Field ID
             value: contact.Id
           }
         ]
