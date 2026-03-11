@@ -9,13 +9,10 @@ const {
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
-
-  HL_API_KEY,
+  HL_API_KEY,                 // XO Marketing
   HL_LOCATION_ID,
-
-  HL_MARRIAGE_API_KEY,
+  HL_MARRIAGE_API_KEY,        // XO Marriage
   HL_MARRIAGE_LOCATION_ID
-
 } = process.env;
 
 let accessToken = null;
@@ -101,7 +98,7 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    console.log("✅ Created in Salesforce");
+    console.log("✅ Contact created in Salesforce");
     return res.status(200).json({ success: true });
 
   } catch (error) {
@@ -136,29 +133,27 @@ app.post("/sf-webhook", async (req, res) => {
 
     const contact = sfContactResponse.data;
 
-    // ============================
-    // MARKETING TAG LOGIC
-    // ============================
-
+    // =======================
+    // TAGS (Marketing Only)
+    // =======================
     const isFromHL = contact.Origin_From_HL_c__c === true;
     const donorSegment = contact.HighLevel_Donor_Segments__c;
 
-    let marketingTags = isFromHL
+    let tagToApply = isFromHL
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
-    if (donorSegment === "Mid Donor") marketingTags.push("SF Mid Donor");
-    if (donorSegment === "Low Donor") marketingTags.push("SF Low Donor");
-    if (donorSegment === "Non-Donor") marketingTags.push("SF Non-Donor");
-    if (donorSegment === "Major Donor") marketingTags.push("SF Major Donor");
+    if (donorSegment === "Mid Donor") tagToApply.push("SF Mid Donor");
+    if (donorSegment === "Low Donor") tagToApply.push("SF Low Donor");
+    if (donorSegment === "Non-Donor") tagToApply.push("SF Non-Donor");
+    if (donorSegment === "Major Donor") tagToApply.push("SF Major Donor");
 
-    // ============================
-    // 1️⃣ XO MARKETING (WITH TAGS)
-    // ============================
-
+    // ======================================================
+    // 1️⃣ XO MARKETING
+    // ======================================================
     console.log("📤 Sending to XO Marketing");
 
-    const marketingUpsert = await axios.post(
+    const marketingResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: HL_LOCATION_ID,
@@ -166,7 +161,7 @@ app.post("/sf-webhook", async (req, res) => {
         firstName: contact.FirstName || "",
         lastName: contact.LastName || "Unknown",
         phone: contact.Phone || contact.HomePhone || null,
-        tags: marketingTags
+        tags: tagToApply
       },
       {
         headers: {
@@ -177,16 +172,17 @@ app.post("/sf-webhook", async (req, res) => {
       }
     );
 
-    const marketingHLId = marketingUpsert.data.contact?.id;
+    const marketingHLId = marketingResponse.data.contact?.id;
 
     if (marketingHLId) {
 
+      // Write SF ID into Marketing HL
       await axios.put(
         `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
         {
           customFields: [
             {
-              id: "0w8kYzW7XY8L0rRwxEHA",
+              id: "0w8kYzW7XY8L0rRwxEHA", // Marketing SF ID field
               value: contact.Id
             }
           ]
@@ -200,6 +196,7 @@ app.post("/sf-webhook", async (req, res) => {
         }
       );
 
+      // Write Marketing HL ID back to Salesforce
       await axios.patch(
         `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
         {
@@ -216,13 +213,12 @@ app.post("/sf-webhook", async (req, res) => {
       console.log("✅ Marketing Sync Complete");
     }
 
-    // ============================
-    // 2️⃣ XO MARRIAGE (NO TAGS)
-    // ============================
-
+    // ======================================================
+    // 2️⃣ XO MARRIAGE
+    // ======================================================
     console.log("📤 Sending to XO Marriage");
 
-    const marriageUpsert = await axios.post(
+    const marriageResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: HL_MARRIAGE_LOCATION_ID,
@@ -240,16 +236,17 @@ app.post("/sf-webhook", async (req, res) => {
       }
     );
 
-    const marriageHLId = marriageUpsert.data.contact?.id;
+    const marriageHLId = marriageResponse.data.contact?.id;
 
     if (marriageHLId) {
 
+      // Write SF ID into Marriage HL
       await axios.put(
         `https://services.leadconnectorhq.com/contacts/${marriageHLId}`,
         {
           customFields: [
             {
-              id: "OgA23wE1DwCjXitTl41d",
+              id: "OgA23wE1DwCjXitTl41d", // Marriage SF ID field
               value: contact.Id
             }
           ]
@@ -263,10 +260,11 @@ app.post("/sf-webhook", async (req, res) => {
         }
       );
 
+      // Write Marriage HL ID back to Salesforce
       await axios.patch(
         `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
         {
-          XO_Marriage_High_Level_ID__c: marriageHLId
+          High_Level_ID__c: marriageHLId
         },
         {
           headers: {
