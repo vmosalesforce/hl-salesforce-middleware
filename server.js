@@ -9,12 +9,8 @@ const {
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
-
-  HL_MARKETING_API_KEY,
-  HL_MARKETING_LOCATION_ID,
-
-  HL_MARRIAGE_API_KEY,
-  HL_MARRIAGE_LOCATION_ID
+  HL_API_KEY,
+  HL_LOCATION_ID
 } = process.env;
 
 let accessToken = null;
@@ -24,7 +20,7 @@ let tokenExpiry = 0;
 // HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 HL ↔ SF Middleware Running (Dual Location)");
+  res.status(200).send("🚀 HL ↔ SF Middleware Running");
 });
 
 // =======================
@@ -60,7 +56,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     const hlData = req.body;
-    const hlContactId = hlData.High_Level_ID__c;
+    const hlContactId = hlData.contact?.id || hlData.id;
 
     if (!hlContactId) {
       return res.status(200).json({ skipped: true });
@@ -84,11 +80,10 @@ app.post("/webhook", async (req, res) => {
     await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
-        FirstName: hlData.FirstName || "",
-        LastName: hlData.LastName || "Unknown",
-        Email: hlData.Email || null,
-        Phone: hlData.Phone || null,
-        HomePhone: hlData.HomePhone || null,
+        FirstName: hlData.firstName || "",
+        LastName: hlData.lastName || "Unknown",
+        Email: hlData.email || null,
+        Phone: hlData.phone || null,
         High_Level_ID__c: hlContactId,
         Origin_From_HL_c__c: true
       },
@@ -100,7 +95,7 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    console.log("✅ Contact created in Salesforce");
+    console.log("✅ Created in Salesforce");
     return res.status(200).json({ success: true });
 
   } catch (error) {
@@ -110,11 +105,11 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ======================================================
-// SF ➜ BOTH XO LOCATIONS
+// SF ➜ XO MARKETING (WITH SF ID WRITE BACK TO HL)
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
   try {
-    console.log("📩 SF ➜ Both HL Locations received");
+    console.log("📩 SF ➜ XO Marketing received");
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -122,11 +117,10 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    if (!sfData.Email) {
+    if (!sfData.Id) {
       return res.status(200).json({ skipped: true });
     }
 
-    // Get full Salesforce contact
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
@@ -136,94 +130,65 @@ app.post("/sf-webhook", async (req, res) => {
 
     const contact = sfContactResponse.data;
 
-    async function pushToHL(apiKey, locationId, sfFieldId, locationLabel) {
-      console.log(`📤 Sending to ${locationLabel}`);
-
-      // UPSERT CONTACT
-      const upsert = await axios.post(
-        "https://services.leadconnectorhq.com/contacts/upsert",
-        {
-          locationId: locationId,
-          email: contact.Email,
-          firstName: contact.FirstName || "",
-          lastName: contact.LastName || "Unknown",
-          phone: contact.Phone || contact.HomePhone || null
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            Version: "2021-04-15",
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      const hlContactId = upsert.data.contact?.id;
-      console.log(`✅ ${locationLabel} HL Contact ID:`, hlContactId);
-
-      if (!hlContactId) return null;
-
-      // WRITE SALESFORCE ID INTO HL
-      await axios.put(
-        `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
-        {
-          customFields: [
-            {
-              id: sfFieldId,
-              value: contact.Id
-            }
-          ]
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            Version: "2021-04-15",
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      console.log(`✅ Salesforce ID written to ${locationLabel}`);
-      return hlContactId;
+    if (!contact.Email) {
+      return res.status(200).json({ skipped: true });
     }
 
-    // 🔹 Push to XO Marketing
-    const marketingHLId = await pushToHL(
-      HL_MARKETING_API_KEY,
-      HL_MARKETING_LOCATION_ID,
-      "0w8kYzW7XY8L0rRwxEHA", // Marketing SF ID field
-      "XO Marketing"
-    );
+    console.log("📤 Upserting contact in HL");
 
-    // 🔹 Push to XO Marriage
-    const marriageHLId = await pushToHL(
-      HL_MARRIAGE_API_KEY,
-      HL_MARRIAGE_LOCATION_ID,
-      "OgA23wE1DwCjXitTl41d", // Marriage SF ID field
-      "XO Marriage"
-    );
-
-    // WRITE BOTH HL IDS BACK TO SALESFORCE
-    await axios.patch(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
+    // 1️⃣ UPSERT CONTACT
+    const hlUpsertResponse = await axios.post(
+      "https://services.leadconnectorhq.com/contacts/upsert",
       {
-        XO_Marketing_High_Level_ID__c: marketingHLId,
-        XO_Marriage_High_Level_ID__c: marriageHLId
+        locationId: HL_LOCATION_ID,
+        email: contact.Email,
+        firstName: contact.FirstName || "",
+        lastName: contact.LastName || "Unknown",
+        phone: contact.Phone || contact.HomePhone || null
       },
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${HL_API_KEY}`,
+          Version: "2021-04-15",
           "Content-Type": "application/json"
         }
       }
     );
 
-    console.log("✅ Both HL IDs written back to Salesforce");
+    const hlContactId = hlUpsertResponse.data.contact?.id;
+
+    console.log("✅ HL Contact ID:", hlContactId);
+
+    if (!hlContactId) {
+      return res.status(200).json({ success: true });
+    }
+
+    // 2️⃣ WRITE SF ID INTO HL (THIS IS WHAT YOU WANTED)
+    await axios.put(
+      `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
+      {
+        customFields: [
+          {
+            id: "OgA23wE1DwCjXitTl41d", // Salesforce Contact ID field
+            value: contact.Id
+          }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${HL_API_KEY}`,
+          Version: "2021-04-15",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    console.log("✅ Salesforce ID written to XO HL");
 
     return res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error("❌ SF ➜ HL Dual Error:", error.response?.data || error.message);
+    console.error("❌ SF ➜ HL Error:", error.response?.data || error.message);
     return res.status(200).json({ handled: true });
   }
 });
