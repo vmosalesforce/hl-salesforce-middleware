@@ -9,8 +9,12 @@ const {
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
-  HL_API_KEY,
-  HL_LOCATION_ID
+
+  HL_API_KEY,                 // Marketing
+  HL_LOCATION_ID,             // Marketing
+
+  HL_MARRIAGE_API_KEY,        // Marriage
+  HL_MARRIAGE_LOCATION_ID     // Marriage
 } = process.env;
 
 let accessToken = null;
@@ -84,7 +88,6 @@ app.post("/webhook", async (req, res) => {
         LastName: hlData.LastName || "Unknown",
         Email: hlData.Email || null,
         Phone: hlData.Phone || null,
-        HomePhone: hlData.HomePhone || null,
         High_Level_ID__c: hlContactId,
         Origin_From_HL_c__c: true
       },
@@ -106,11 +109,11 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ======================================================
-// SF ➜ XO MARKETING
+// SF ➜ BOTH LOCATIONS
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
   try {
-    console.log("📩 SF ➜ XO Marketing received");
+    console.log("📩 SF ➜ BOTH HL LOCATIONS received");
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -131,30 +134,17 @@ app.post("/sf-webhook", async (req, res) => {
 
     const contact = sfContactResponse.data;
 
-    const isFromHL = contact.Origin_From_HL_c__c === true;
-    const donorSegment = contact.HighLevel_Donor_Segments__c;
-
-    let tagToApply = isFromHL
-      ? ["HL Via Salesforce"]
-      : ["Organic Salesforce"];
-
-    if (donorSegment === "Mid Donor") tagToApply.push("SF Mid Donor");
-    if (donorSegment === "Low Donor") tagToApply.push("SF Low Donor");
-    if (donorSegment === "Non-Donor") tagToApply.push("SF Non-Donor");
-    if (donorSegment === "Major Donor") tagToApply.push("SF Major Donor");
-
-    console.log("📤 Sending to XO Marketing with tags:", tagToApply);
-
-    // 1️⃣ UPSERT CONTACT
-    const hlUpsertResponse = await axios.post(
+    // ======================
+    // 🔹 MARKETING
+    // ======================
+    const marketingUpsert = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
         locationId: HL_LOCATION_ID,
         email: contact.Email,
         firstName: contact.FirstName || "",
         lastName: contact.LastName || "Unknown",
-        phone: contact.Phone || contact.HomePhone || null,
-        tags: tagToApply
+        phone: contact.Phone || contact.HomePhone || null
       },
       {
         headers: {
@@ -165,56 +155,81 @@ app.post("/sf-webhook", async (req, res) => {
       }
     );
 
-    const hlContactId = hlUpsertResponse.data.contact?.id;
+    const marketingHLId = marketingUpsert.data.contact?.id;
 
-    console.log("✅ HL Contact ID:", hlContactId);
-
-    if (!hlContactId) {
-      return res.status(200).json({ success: true });
+    if (marketingHLId) {
+      await axios.put(
+        `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
+        {
+          customFields: [
+            {
+              id: "0w8kYzW7XY8L0rRwxEHA", // Marketing SF ID field
+              value: contact.Id
+            }
+          ]
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${HL_API_KEY}`,
+            Version: "2021-04-15",
+            "Content-Type": "application/json"
+          }
+        }
+      );
     }
 
-    // 2️⃣ WRITE SF ID INTO HL
-    await axios.put(
-      `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
+    console.log("✅ Marketing updated");
+
+    // ======================
+    // 🔹 MARRIAGE
+    // ======================
+    const marriageUpsert = await axios.post(
+      "https://services.leadconnectorhq.com/contacts/upsert",
       {
-        customFields: [
-          {
-            id: "0w8kYzW7XY8L0rRwxEHA",
-            value: contact.Id
-          }
-        ]
+        locationId: HL_MARRIAGE_LOCATION_ID,
+        email: contact.Email,
+        firstName: contact.FirstName || "",
+        lastName: contact.LastName || "Unknown",
+        phone: contact.Phone || contact.HomePhone || null
       },
       {
         headers: {
-          Authorization: `Bearer ${HL_API_KEY}`,
+          Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
           Version: "2021-04-15",
           "Content-Type": "application/json"
         }
       }
     );
 
-    console.log("✅ Salesforce ID written to HL");
+    const marriageHLId = marriageUpsert.data.contact?.id;
 
-    // 3️⃣ WRITE HL ID BACK TO SALESFORCE
-    await axios.patch(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
-      {
-        XO_Marketing_High_Level_ID__c: hlContactId
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
+    if (marriageHLId) {
+      await axios.put(
+        `https://services.leadconnectorhq.com/contacts/${marriageHLId}`,
+        {
+          customFields: [
+            {
+              id: "OgA23wE1DwCjXitTl41d", // Marriage SF ID field
+              value: contact.Id
+            }
+          ]
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
+            Version: "2021-04-15",
+            "Content-Type": "application/json"
+          }
         }
-      }
-    );
+      );
+    }
 
-    console.log("✅ HL Marketing ID written back to Salesforce");
+    console.log("✅ Marriage updated");
 
     return res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error("❌ SF ➜ Marketing Error:", error.response?.data || error.message);
+    console.error("❌ SF ➜ HL Error:", error.response?.data || error.message);
     return res.status(200).json({ handled: true });
   }
 });
