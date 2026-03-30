@@ -10,9 +10,7 @@ const {
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
   HL_API_KEY,                 // XO Marketing
-  HL_LOCATION_ID,
-  HL_MARRIAGE_API_KEY,        // XO Marriage
-  HL_MARRIAGE_LOCATION_ID
+  HL_LOCATION_ID
 } = process.env;
 
 let accessToken = null;
@@ -108,11 +106,11 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ======================================================
-// SF ➜ BOTH HL LOCATIONS
+// SF ➜ XO MARKETING ONLY
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
   try {
-    console.log("📩 SF ➜ Both HL Locations received");
+    console.log("📩 SF ➜ XO Marketing received");
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -143,32 +141,25 @@ app.post("/sf-webhook", async (req, res) => {
       ? ["HL Via Salesforce"]
       : ["Organic Salesforce"];
 
-    // Donor Tags
     if (donorSegment === "Mid Donor") tagToApply.push("SF Mid Donor");
     if (donorSegment === "Low Donor") tagToApply.push("SF Low Donor");
     if (donorSegment === "Non-Donor") tagToApply.push("SF Non-Donor");
     if (donorSegment === "Major Donor") tagToApply.push("SF Major Donor");
 
-    // Vision Retreat
     if (contact.VR__c) {
       tagToApply.push("SF Vision Retreat Attendee");
     }
 
-    // Conferences
     if (contact.Conferences__c) {
       tagToApply.push("SF Conference Attendee");
     }
 
-    // Shopify (Simple Version)
     if (contact.Shopify_Segment__c && contact.Shopify_Segment__c !== "No Shopify") {
       tagToApply.push("SF Shopify Buyer");
     }
 
     console.log("📤 Sending to XO Marketing with tags:", tagToApply);
 
-    // ======================================================
-    // 1️⃣ XO MARKETING
-    // ======================================================
     const marketingResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
       {
@@ -227,72 +218,10 @@ app.post("/sf-webhook", async (req, res) => {
       console.log("✅ Marketing Sync Complete");
     }
 
-    // ======================================================
-    // 2️⃣ XO MARRIAGE (No Tags)
-    // ======================================================
-    console.log("📤 Sending to XO Marriage");
-
-    const marriageResponse = await axios.post(
-      "https://services.leadconnectorhq.com/contacts/upsert",
-      {
-        locationId: HL_MARRIAGE_LOCATION_ID,
-        email: contact.Email,
-        firstName: contact.FirstName || "",
-        lastName: contact.LastName || "Unknown",
-        phone: contact.Phone || contact.HomePhone || null
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
-          Version: "2021-04-15",
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    const marriageHLId = marriageResponse.data.contact?.id;
-
-    if (marriageHLId) {
-
-      await axios.put(
-        `https://services.leadconnectorhq.com/contacts/${marriageHLId}`,
-        {
-          customFields: [
-            {
-              id: "OgA23wE1DwCjXitTl41d",
-              value: contact.Id
-            }
-          ]
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
-            Version: "2021-04-15",
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      await axios.patch(
-        `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
-        {
-          High_Level_ID__c: marriageHLId
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      console.log("✅ Marriage Sync Complete");
-    }
-
     return res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error("❌ SF ➜ HL Dual Error:", error.response?.data || error.message);
+    console.error("❌ SF ➜ Marketing Error:", error.response?.data || error.message);
     return res.status(200).json({ handled: true });
   }
 });
