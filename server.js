@@ -9,8 +9,7 @@ const {
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
-  HL_API_KEY,                 // XO Marketing
-  HL_LOCATION_ID
+  HL_API_KEY
 } = process.env;
 
 let accessToken = null;
@@ -20,7 +19,7 @@ let tokenExpiry = 0;
 // HEALTH CHECK
 // =======================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 HL ↔ SF Middleware Running");
+  res.status(200).send("🚀 HL ➜ SF Middleware Running");
 });
 
 // =======================
@@ -45,7 +44,7 @@ async function refreshAccessToken() {
 }
 
 // ======================================================
-// HL ➜ SF
+// HL ➜ SF (ONLY direction allowed)
 // ======================================================
 app.post("/webhook", async (req, res) => {
   try {
@@ -59,9 +58,11 @@ app.post("/webhook", async (req, res) => {
     const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
+      console.log("⚠ No HL Contact ID provided");
       return res.status(200).json({ skipped: true });
     }
 
+    // Check if Contact already exists in Salesforce
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -77,7 +78,8 @@ app.post("/webhook", async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
-    await axios.post(
+    // Create Contact in Salesforce
+    const sfCreateResponse = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       {
         FirstName: hlData.FirstName || "",
@@ -96,79 +98,22 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    console.log("✅ Contact created in Salesforce");
-    return res.status(200).json({ success: true });
+    const sfId = sfCreateResponse.data.id;
 
-  } catch (error) {
-    console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
-    return res.status(200).json({ handled: true });
-  }
-});
+    console.log("✅ Contact created in Salesforce:", sfId);
 
-// ======================================================
-// SF ➜ XO MARKETING ONLY
-// ======================================================
-app.post("/sf-webhook", async (req, res) => {
-  try {
-    console.log("📩 SF ➜ XO Marketing received");
-
-    if (!accessToken || Date.now() > tokenExpiry) {
-      await refreshAccessToken();
-    }
-
-    const sfData = req.body;
-
-    if (!sfData.Email) {
-      return res.status(200).json({ skipped: true });
-    }
-
-    const sfContactResponse = await axios.get(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
+    // ======================================================
+    // WRITE SF ID BACK TO HL
+    // ======================================================
+    await axios.put(
+      `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      }
-    );
-
-    const contact = sfContactResponse.data;
-
-    // =======================
-    // TAGS (Marketing Only)
-    // =======================
-    const isFromHL = contact.Origin_From_HL_c__c === true;
-    const donorSegment = contact.HighLevel_Donor_Segments__c;
-
-    let tagToApply = isFromHL
-      ? ["HL Via Salesforce"]
-      : ["Organic Salesforce"];
-
-    if (donorSegment === "Mid Donor") tagToApply.push("SF Mid Donor");
-    if (donorSegment === "Low Donor") tagToApply.push("SF Low Donor");
-    if (donorSegment === "Non-Donor") tagToApply.push("SF Non-Donor");
-    if (donorSegment === "Major Donor") tagToApply.push("SF Major Donor");
-
-    if (contact.VR__c) {
-      tagToApply.push("SF Vision Retreat Attendee");
-    }
-
-    if (contact.Conferences__c) {
-      tagToApply.push("SF Conference Attendee");
-    }
-
-    if (contact.Shopify_Segment__c && contact.Shopify_Segment__c !== "No Shopify") {
-      tagToApply.push("SF Shopify Buyer");
-    }
-
-    console.log("📤 Sending to XO Marketing with tags:", tagToApply);
-
-    const marketingResponse = await axios.post(
-      "https://services.leadconnectorhq.com/contacts/upsert",
-      {
-        locationId: HL_LOCATION_ID,
-        email: contact.Email,
-        firstName: contact.FirstName || "",
-        lastName: contact.LastName || "Unknown",
-        phone: contact.Phone || contact.HomePhone || null,
-        tags: tagToApply
+        customFields: [
+          {
+            id: "0w8kYzW7XY8L0rRwxEHA", // Your Salesforce ID custom field in HL
+            value: sfId
+          }
+        ]
       },
       {
         headers: {
@@ -179,52 +124,21 @@ app.post("/sf-webhook", async (req, res) => {
       }
     );
 
-    const marketingHLId = marketingResponse.data.contact?.id;
-
-    if (marketingHLId) {
-
-      await axios.put(
-        `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
-        {
-          customFields: [
-            {
-              id: "0w8kYzW7XY8L0rRwxEHA",
-              value: contact.Id
-            }
-          ]
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${HL_API_KEY}`,
-            Version: "2021-04-15",
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      await axios.patch(
-        `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
-        {
-          XO_Marketing_High_Level_ID__c: marketingHLId
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json"
-          }
-        }
-      );
-
-      console.log("✅ Marketing Sync Complete");
-    }
+    console.log("✅ SF ID written back to HL");
 
     return res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error("❌ SF ➜ Marketing Error:", error.response?.data || error.message);
+    console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
     return res.status(200).json({ handled: true });
   }
 });
+
+// ======================================================
+// SF ➜ HL DISABLED
+// ======================================================
+// We intentionally do NOT allow Salesforce-created contacts
+// to be pushed into HighLevel anymore.
 
 app.listen(3000, () => {
   console.log("🚀 Server running on port 3000");
