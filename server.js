@@ -9,9 +9,9 @@ const {
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
-  HL_API_KEY,                 // XO Marketing
+  HL_API_KEY,
   HL_LOCATION_ID,
-  HL_MARRIAGE_API_KEY,        // XO Marriage
+  HL_MARRIAGE_API_KEY,
   HL_MARRIAGE_LOCATION_ID
 } = process.env;
 
@@ -108,11 +108,12 @@ app.post("/webhook", async (req, res) => {
 });
 
 // ======================================================
-// SF ➜ BOTH HL LOCATIONS
+// SF ➜ HL WRITEBACK ONLY
+// Only runs when the Salesforce Contact was created from HL first
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
   try {
-    console.log("📩 SF ➜ Both HL Locations received");
+    console.log("📩 SF ➜ HL writeback received");
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -120,8 +121,11 @@ app.post("/sf-webhook", async (req, res) => {
 
     const sfData = req.body;
 
-    if (!sfData.Email) {
-      return res.status(200).json({ skipped: true });
+    if (!sfData.Id) {
+      return res.status(200).json({
+        skipped: true,
+        reason: "Missing Salesforce Contact Id"
+      });
     }
 
     const sfContactResponse = await axios.get(
@@ -133,38 +137,49 @@ app.post("/sf-webhook", async (req, res) => {
 
     const contact = sfContactResponse.data;
 
+    // ======================================================
+    // STOP ORGANIC SALESFORCE CONTACTS
+    // ======================================================
+    if (contact.Origin_From_HL_c__c !== true) {
+      console.log("⏭ Skipped: Organic Salesforce contact. Not sent to HighLevel.");
+      return res.status(200).json({
+        skipped: true,
+        reason: "Organic Salesforce contact - not sent to HighLevel"
+      });
+    }
+
+    if (!contact.Email) {
+      return res.status(200).json({
+        skipped: true,
+        reason: "Missing email"
+      });
+    }
+
     // =======================
-    // TAGS (Marketing Only)
+    // TAGS - Marketing Only
     // =======================
-    const isFromHL = contact.Origin_From_HL_c__c === true;
     const donorSegment = contact.HighLevel_Donor_Segments__c;
 
-    let tagToApply = isFromHL
-      ? ["HL Via Salesforce"]
-      : ["Organic Salesforce"];
+    let tagToApply = ["HL Via Salesforce"];
 
-    // Donor Tags
     if (donorSegment === "Mid Donor") tagToApply.push("SF Mid Donor");
     if (donorSegment === "Low Donor") tagToApply.push("SF Low Donor");
     if (donorSegment === "Non-Donor") tagToApply.push("SF Non-Donor");
     if (donorSegment === "Major Donor") tagToApply.push("SF Major Donor");
 
-    // Vision Retreat
     if (contact.VR__c) {
       tagToApply.push("SF Vision Retreat Attendee");
     }
 
-    // Conferences
     if (contact.Conferences__c) {
       tagToApply.push("SF Conference Attendee");
     }
 
-    // Shopify (Simple Version)
     if (contact.Shopify_Segment__c && contact.Shopify_Segment__c !== "No Shopify") {
       tagToApply.push("SF Shopify Buyer");
     }
 
-    console.log("📤 Sending to XO Marketing with tags:", tagToApply);
+    console.log("📤 Writing back to XO Marketing with tags:", tagToApply);
 
     // ======================================================
     // 1️⃣ XO MARKETING
@@ -191,7 +206,6 @@ app.post("/sf-webhook", async (req, res) => {
     const marketingHLId = marketingResponse.data.contact?.id;
 
     if (marketingHLId) {
-
       await axios.put(
         `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
         {
@@ -224,13 +238,13 @@ app.post("/sf-webhook", async (req, res) => {
         }
       );
 
-      console.log("✅ Marketing Sync Complete");
+      console.log("✅ Marketing writeback complete");
     }
 
     // ======================================================
-    // 2️⃣ XO MARRIAGE (No Tags)
+    // 2️⃣ XO MARRIAGE
     // ======================================================
-    console.log("📤 Sending to XO Marriage");
+    console.log("📤 Writing back to XO Marriage");
 
     const marriageResponse = await axios.post(
       "https://services.leadconnectorhq.com/contacts/upsert",
@@ -253,7 +267,6 @@ app.post("/sf-webhook", async (req, res) => {
     const marriageHLId = marriageResponse.data.contact?.id;
 
     if (marriageHLId) {
-
       await axios.put(
         `https://services.leadconnectorhq.com/contacts/${marriageHLId}`,
         {
@@ -286,13 +299,13 @@ app.post("/sf-webhook", async (req, res) => {
         }
       );
 
-      console.log("✅ Marriage Sync Complete");
+      console.log("✅ Marriage writeback complete");
     }
 
     return res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error("❌ SF ➜ HL Dual Error:", error.response?.data || error.message);
+    console.error("❌ SF ➜ HL Writeback Error:", error.response?.data || error.message);
     return res.status(200).json({ handled: true });
   }
 });
