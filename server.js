@@ -75,6 +75,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     const hlData = req.body;
+    console.log("📦 HL Payload:", JSON.stringify(hlData, null, 2));
     const hlContactId = hlData.High_Level_ID__c;
 
     if (!hlContactId) {
