@@ -9,13 +9,23 @@ const {
   SF_CLIENT_SECRET,
   SF_REFRESH_TOKEN,
   SF_INSTANCE_URL,
+
+  // XO MARKETING
   HL_API_KEY,
-  HL_LOCATION_ID
+  HL_LOCATION_ID,
+
+  // XO HL / XO MARRIAGE (SOURCE SYSTEM)
+  HL_MARRIAGE_API_KEY,
+  HL_MARRIAGE_LOCATION_ID
+
 } = process.env;
 
 let accessToken = null;
 let tokenExpiry = 0;
 
+// ======================================================
+// SALESFORCE MANAGED TAGS
+// ======================================================
 const SALESFORCE_MANAGED_TAGS = [
   "HL Via Salesforce",
   "Manual Send to XO Marketing",
@@ -28,13 +38,28 @@ const SALESFORCE_MANAGED_TAGS = [
   "SF Shopify Buyer"
 ];
 
-const HL_SALESFORCE_ID_FIELD_ID = "0w8kYzW7XY8L0rRwxEHA";
+// ======================================================
+// CUSTOM FIELD IDS
+// ======================================================
 
+// XO Marketing SF ID field
+const XO_MARKETING_SF_FIELD_ID = "0w8kYzW7XY8L0rRwxEHA";
+
+// XO HL / Marriage SF ID field
+const XO_HL_SF_FIELD_ID = "OgA23wE1DwCjXitTl41d";
+
+// ======================================================
+// HEALTH CHECK
+// ======================================================
 app.get("/", (req, res) => {
-  res.status(200).send("🚀 HL ↔ SF Middleware Running - Marketing Only");
+  res.status(200).send("🚀 HL ↔ SF Middleware Running");
 });
 
+// ======================================================
+// REFRESH SALESFORCE TOKEN
+// ======================================================
 async function refreshAccessToken() {
+
   const response = await axios.post(
     "https://login.salesforce.com/services/oauth2/token",
     new URLSearchParams({
@@ -43,82 +68,133 @@ async function refreshAccessToken() {
       client_secret: SF_CLIENT_SECRET,
       refresh_token: SF_REFRESH_TOKEN
     }),
-    { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      }
+    }
   );
 
   accessToken = response.data.access_token;
   tokenExpiry = Date.now() + 1000 * 60 * 90;
+
   console.log("🔄 Salesforce token refreshed");
 }
 
+// ======================================================
+// PARSE DND
+// ======================================================
 function parseDndValue(value) {
-  if (value === true || value === "true") return true;
-  if (value === false || value === "false") return false;
+
+  if (value === true || value === "true") {
+    return true;
+  }
+
+  if (value === false || value === "false") {
+    return false;
+  }
+
   return null;
 }
 
-async function writeSalesforceIdBackToHighLevel(hlContactId, salesforceContactId) {
+// ======================================================
+// WRITE SF ID BACK TO XO HL SOURCE CONTACT
+// DOES NOT CREATE CONTACTS
+// ONLY UPDATES EXISTING CONTACT
+// ======================================================
+async function writeSalesforceIdBackToXOHL(
+  hlContactId,
+  salesforceContactId
+) {
+
   await axios.put(
     `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
     {
       customFields: [
         {
-          id: HL_SALESFORCE_ID_FIELD_ID,
+          id: XO_HL_SF_FIELD_ID,
           value: salesforceContactId
         }
       ]
     },
     {
       headers: {
-        Authorization: `Bearer ${HL_API_KEY}`,
+        Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
         Version: "2021-04-15",
         "Content-Type": "application/json"
       }
     }
   );
 
-  console.log("✅ Salesforce Contact Id written back to HighLevel");
+  console.log("✅ Salesforce ID written back to XO HL");
 }
 
 // ======================================================
-// HL MARKETING ➜ SALESFORCE
-// Also handles HL DND/emailDnd ➜ Salesforce Email Opt Out
+// HL / XO HL ➜ SALESFORCE
 // ======================================================
 app.post("/webhook", async (req, res) => {
+
   try {
-    console.log("📩 HL Marketing ➜ SF received");
+
+    console.log("📩 XO HL ➜ SF received");
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
     }
 
     const hlData = req.body;
-    console.log("📦 HL Payload:", JSON.stringify(hlData, null, 2));
+
+    console.log(
+      "📦 HL Payload:",
+      JSON.stringify(hlData, null, 2)
+    );
 
     const hlContactId = hlData.High_Level_ID__c;
-    const dndValue = parseDndValue(hlData.emailDnd ?? hlData.dnd);
+
+    const dndValue = parseDndValue(
+      hlData.emailDnd ?? hlData.dnd
+    );
 
     if (!hlContactId) {
+
       return res.status(200).json({
         skipped: true,
         reason: "Missing HighLevel Contact Id"
       });
     }
 
+    // ======================================================
+    // FIND EXISTING SF CONTACT
+    // ======================================================
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        },
         params: {
-          q: `SELECT Id FROM Contact WHERE XO_Marketing_High_Level_ID__c = '${hlContactId}' LIMIT 1`
+          q: `
+            SELECT Id
+            FROM Contact
+            WHERE High_Level_ID__c = '${hlContactId}'
+            LIMIT 1
+          `
         }
       }
     );
 
+    // ======================================================
+    // EXISTING SF CONTACT
+    // ======================================================
     if (query.data.records.length > 0) {
+
       const sfContactId = query.data.records[0].Id;
 
+      // ======================================================
+      // UPDATE EMAIL OPT OUT FROM DND
+      // ======================================================
       if (dndValue !== null) {
+
         await axios.patch(
           `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
           {
@@ -132,27 +208,44 @@ app.post("/webhook", async (req, res) => {
           }
         );
 
-        console.log(`✅ Salesforce Email Opt Out updated to ${dndValue}`);
+        console.log(
+          `✅ Salesforce Email Opt Out updated to ${dndValue}`
+        );
       }
 
-      await writeSalesforceIdBackToHighLevel(hlContactId, sfContactId);
+      // ======================================================
+      // WRITE SF ID BACK TO XO HL
+      // ======================================================
+      await writeSalesforceIdBackToXOHL(
+        hlContactId,
+        sfContactId
+      );
+
+      console.log("⏭ Existing Salesforce Contact found");
 
       return res.status(200).json({
-        success: true,
-        message: "Existing Salesforce Contact processed"
+        success: true
       });
     }
 
+    // ======================================================
+    // CREATE NEW SF CONTACT
+    // ======================================================
     const newContactBody = {
+
       FirstName: hlData.FirstName || "",
       LastName: hlData.LastName || "Unknown",
       Email: hlData.Email || null,
       Phone: hlData.Phone || null,
       HomePhone: hlData.HomePhone || null,
-      XO_Marketing_High_Level_ID__c: hlContactId,
+
+      High_Level_ID__c: hlContactId,
       Origin_From_HL_c__c: true
     };
 
+    // ======================================================
+    // SET EMAIL OPT OUT FROM DND
+    // ======================================================
     if (dndValue !== null) {
       newContactBody.HasOptedOutOfEmail = dndValue;
     }
@@ -170,12 +263,15 @@ app.post("/webhook", async (req, res) => {
 
     const newSalesforceContactId = createResponse.data.id;
 
-    await writeSalesforceIdBackToHighLevel(
+    console.log("✅ Contact created in Salesforce");
+
+    // ======================================================
+    // WRITE SF ID BACK TO XO HL
+    // ======================================================
+    await writeSalesforceIdBackToXOHL(
       hlContactId,
       newSalesforceContactId
     );
-
-    console.log("✅ Contact created in Salesforce from HL Marketing");
 
     return res.status(200).json({
       success: true,
@@ -183,21 +279,26 @@ app.post("/webhook", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
+
+    console.error(
+      "❌ HL ➜ SF Error:",
+      error.response?.data || error.message
+    );
 
     return res.status(200).json({
-      handled: true,
-      error: error.response?.data || error.message
+      handled: true
     });
   }
 });
 
 // ======================================================
-// SF ➜ HL MARKETING WRITEBACK / TAG UPDATE
+// SF ➜ XO MARKETING ONLY
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
+
   try {
-    console.log("📩 SF ➜ HL Marketing writeback received");
+
+    console.log("📩 SF ➜ XO Marketing received");
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -206,6 +307,7 @@ app.post("/sf-webhook", async (req, res) => {
     const sfData = req.body;
 
     if (!sfData.Id) {
+
       return res.status(200).json({
         skipped: true,
         reason: "Missing Salesforce Contact Id"
@@ -215,17 +317,26 @@ app.post("/sf-webhook", async (req, res) => {
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` }
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
       }
     );
 
     const contact = sfContactResponse.data;
 
+    // ======================================================
+    // STOP ORGANIC SF CONTACTS
+    // FROM GOING TO XO HL
+    // ======================================================
     if (
       contact.Origin_From_HL_c__c !== true &&
       !contact.XO_Marketing_High_Level_ID__c
     ) {
-      console.log("⏭ Skipped: Organic Salesforce contact not connected to XO Marketing.");
+
+      console.log(
+        "⏭ Skipped: Organic Salesforce contact not connected to XO Marketing."
+      );
 
       return res.status(200).json({
         skipped: true,
@@ -233,10 +344,18 @@ app.post("/sf-webhook", async (req, res) => {
       });
     }
 
-    return await sendToMarketingHighLevel(contact, res, false);
+    return await sendToMarketingHighLevel(
+      contact,
+      res,
+      false
+    );
 
   } catch (error) {
-    console.error("❌ SF ➜ HL Marketing Error:", error.response?.data || error.message);
+
+    console.error(
+      "❌ SF ➜ XO Marketing Error:",
+      error.response?.data || error.message
+    );
 
     return res.status(200).json({
       handled: true,
@@ -246,10 +365,12 @@ app.post("/sf-webhook", async (req, res) => {
 });
 
 // ======================================================
-// MANUAL BUTTON ➜ XO MARKETING ONLY
+// MANUAL BUTTON ➜ XO MARKETING
 // ======================================================
 app.post("/manual-xo-marketing", async (req, res) => {
+
   try {
+
     console.log("📩 Manual SF Button ➜ XO Marketing received");
 
     if (!accessToken || Date.now() > tokenExpiry) {
@@ -259,6 +380,7 @@ app.post("/manual-xo-marketing", async (req, res) => {
     const sfData = req.body;
 
     if (!sfData.Id) {
+
       return res.status(200).json({
         skipped: true,
         reason: "Missing Salesforce Contact Id"
@@ -268,16 +390,26 @@ app.post("/manual-xo-marketing", async (req, res) => {
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` }
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
       }
     );
 
     const contact = sfContactResponse.data;
 
-    return await sendToMarketingHighLevel(contact, res, true);
+    return await sendToMarketingHighLevel(
+      contact,
+      res,
+      true
+    );
 
   } catch (error) {
-    console.error("❌ Manual XO Marketing Error:", error.response?.data || error.message);
+
+    console.error(
+      "❌ Manual XO Marketing Error:",
+      error.response?.data || error.message
+    );
 
     return res.status(200).json({
       handled: true,
@@ -286,44 +418,91 @@ app.post("/manual-xo-marketing", async (req, res) => {
   }
 });
 
+// ======================================================
+// BUILD SALESFORCE TAGS
+// ======================================================
 function buildSalesforceTags(contact, isManualSend) {
-  const donorSegment = contact.HighLevel_Donor_Segments__c || "";
-  const shopifySegment = contact.Shopify_Segment__c || "";
+
+  const donorSegment =
+    contact.HighLevel_Donor_Segments__c || "";
+
+  const shopifySegment =
+    contact.Shopify_Segment__c || "";
 
   let tags = ["HL Via Salesforce"];
 
-  if (isManualSend) tags.push("Manual Send to XO Marketing");
+  if (isManualSend) {
+    tags.push("Manual Send to XO Marketing");
+  }
 
-  if (donorSegment.includes("Mid")) tags.push("SF Mid Donor");
-  if (donorSegment.includes("Low")) tags.push("SF Low Donor");
-  if (donorSegment.includes("Non")) tags.push("SF Non-Donor");
+  if (donorSegment.includes("Mid")) {
+    tags.push("SF Mid Donor");
+  }
 
-  if (donorSegment.includes("High") || donorSegment.includes("Major")) {
+  if (donorSegment.includes("Low")) {
+    tags.push("SF Low Donor");
+  }
+
+  if (donorSegment.includes("Non")) {
+    tags.push("SF Non-Donor");
+  }
+
+  if (
+    donorSegment.includes("High") ||
+    donorSegment.includes("Major")
+  ) {
     tags.push("SF Major Donor");
   }
 
-  if (contact.VR__c) tags.push("SF Vision Retreat Attendee");
-  if (contact.Conferences__c) tags.push("SF Conference Attendee");
+  if (contact.VR__c) {
+    tags.push("SF Vision Retreat Attendee");
+  }
 
-  if (shopifySegment && shopifySegment !== "No Shopify") {
+  if (contact.Conferences__c) {
+    tags.push("SF Conference Attendee");
+  }
+
+  if (
+    shopifySegment &&
+    shopifySegment !== "No Shopify"
+  ) {
     tags.push("SF Shopify Buyer");
   }
 
   return tags;
 }
 
-async function sendToMarketingHighLevel(contact, res, isManualSend) {
+// ======================================================
+// SEND TO XO MARKETING
+// ======================================================
+async function sendToMarketingHighLevel(
+  contact,
+  res,
+  isManualSend
+) {
+
   if (!contact.Email) {
+
     return res.status(200).json({
       skipped: true,
       reason: "Missing email"
     });
   }
 
-  const newSalesforceTags = buildSalesforceTags(contact, isManualSend);
+  const newSalesforceTags =
+    buildSalesforceTags(
+      contact,
+      isManualSend
+    );
 
-  console.log("🏷 New Salesforce tags:", newSalesforceTags);
+  console.log(
+    "🏷 New Salesforce tags:",
+    newSalesforceTags
+  );
 
+  // ======================================================
+  // UPSERT XO MARKETING CONTACT
+  // ======================================================
   const marketingResponse = await axios.post(
     "https://services.leadconnectorhq.com/contacts/upsert",
     {
@@ -343,15 +522,20 @@ async function sendToMarketingHighLevel(contact, res, isManualSend) {
     }
   );
 
-  const marketingHLId = marketingResponse.data.contact?.id;
+  const marketingHLId =
+    marketingResponse.data.contact?.id;
 
   if (!marketingHLId) {
+
     return res.status(200).json({
       handled: true,
       reason: "HighLevel did not return a contact id"
     });
   }
 
+  // ======================================================
+  // GET EXISTING XO MARKETING TAGS
+  // ======================================================
   const hlContactResponse = await axios.get(
     `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
     {
@@ -368,10 +552,15 @@ async function sendToMarketingHighLevel(contact, res, isManualSend) {
     hlContactResponse.data.tags ||
     [];
 
+  // ======================================================
+  // REMOVE OLD SF MANAGED TAGS
+  // ======================================================
   const preservedHighLevelTags = currentTags.filter(
     tag =>
       !SALESFORCE_MANAGED_TAGS.some(
-        managedTag => managedTag.toLowerCase() === String(tag).toLowerCase()
+        managedTag =>
+          managedTag.toLowerCase() ===
+          String(tag).toLowerCase()
       )
   );
 
@@ -382,9 +571,19 @@ async function sendToMarketingHighLevel(contact, res, isManualSend) {
     ])
   ];
 
-  console.log("🧹 Preserved HL-only tags:", preservedHighLevelTags);
-  console.log("✅ Final tags after cleanup:", finalTags);
+  console.log(
+    "🧹 Preserved HL-only tags:",
+    preservedHighLevelTags
+  );
 
+  console.log(
+    "✅ Final tags after cleanup:",
+    finalTags
+  );
+
+  // ======================================================
+  // UPDATE XO MARKETING CONTACT
+  // ======================================================
   await axios.put(
     `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
     {
@@ -392,9 +591,10 @@ async function sendToMarketingHighLevel(contact, res, isManualSend) {
       lastName: contact.LastName || "Unknown",
       phone: contact.Phone || contact.HomePhone || null,
       tags: finalTags,
+
       customFields: [
         {
-          id: HL_SALESFORCE_ID_FIELD_ID,
+          id: XO_MARKETING_SF_FIELD_ID,
           value: contact.Id
         }
       ]
@@ -408,6 +608,9 @@ async function sendToMarketingHighLevel(contact, res, isManualSend) {
     }
   );
 
+  // ======================================================
+  // SAVE XO MARKETING ID TO SF
+  // ======================================================
   await axios.patch(
     `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
     {
@@ -421,13 +624,12 @@ async function sendToMarketingHighLevel(contact, res, isManualSend) {
     }
   );
 
-  console.log("✅ XO Marketing tag cleanup/writeback complete");
+  console.log(
+    "✅ XO Marketing sync complete"
+  );
 
   return res.status(200).json({
     success: true,
-    message: isManualSend
-      ? "Contact manually sent to XO Marketing with tag cleanup"
-      : "Contact synced to XO Marketing with tag cleanup",
     highLevelId: marketingHLId,
     finalTags
   });
