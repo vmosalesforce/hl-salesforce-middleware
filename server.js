@@ -46,6 +46,7 @@ async function refreshAccessToken() {
 
   accessToken = response.data.access_token;
   tokenExpiry = Date.now() + 1000 * 60 * 90;
+
   console.log("🔄 Salesforce token refreshed");
 }
 
@@ -57,6 +58,7 @@ function parseDndValue(value) {
 
 // ======================================================
 // HL MARKETING ➜ SALESFORCE
+// Also handles HL DND/emailDnd ➜ Salesforce Email Opt Out
 // ======================================================
 app.post("/webhook", async (req, res) => {
   try {
@@ -70,7 +72,9 @@ app.post("/webhook", async (req, res) => {
     console.log("📦 HL Payload:", JSON.stringify(hlData, null, 2));
 
     const hlContactId = hlData.High_Level_ID__c;
-    const dndValue = parseDndValue(hlData.dnd);
+
+    // Accept either emailDnd or dnd from HighLevel workflow payload
+    const dndValue = parseDndValue(hlData.emailDnd ?? hlData.dnd);
 
     if (!hlContactId) {
       return res.status(200).json({
@@ -82,7 +86,9 @@ app.post("/webhook", async (req, res) => {
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        },
         params: {
           q: `SELECT Id FROM Contact WHERE XO_Marketing_High_Level_ID__c = '${hlContactId}' LIMIT 1`
         }
@@ -144,7 +150,9 @@ app.post("/webhook", async (req, res) => {
 
     console.log("✅ Contact created in Salesforce from HL Marketing");
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({
+      success: true
+    });
 
   } catch (error) {
     console.error("❌ HL ➜ SF Error:", error.response?.data || error.message);
@@ -179,7 +187,9 @@ app.post("/sf-webhook", async (req, res) => {
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` }
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
       }
     );
 
@@ -232,7 +242,9 @@ app.post("/manual-xo-marketing", async (req, res) => {
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` }
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
       }
     );
 
@@ -250,32 +262,59 @@ app.post("/manual-xo-marketing", async (req, res) => {
   }
 });
 
+// ======================================================
+// BUILD CURRENT SALESFORCE TAGS
+// ======================================================
 function buildSalesforceTags(contact, isManualSend) {
   const donorSegment = contact.HighLevel_Donor_Segments__c || "";
   const shopifySegment = contact.Shopify_Segment__c || "";
 
   let tags = ["HL Via Salesforce"];
 
-  if (isManualSend) tags.push("Manual Send to XO Marketing");
+  if (isManualSend) {
+    tags.push("Manual Send to XO Marketing");
+  }
 
-  if (donorSegment.includes("Mid")) tags.push("SF Mid Donor");
-  if (donorSegment.includes("Low")) tags.push("SF Low Donor");
-  if (donorSegment.includes("Non")) tags.push("SF Non-Donor");
+  if (donorSegment.includes("Mid")) {
+    tags.push("SF Mid Donor");
+  }
 
-  if (donorSegment.includes("High") || donorSegment.includes("Major")) {
+  if (donorSegment.includes("Low")) {
+    tags.push("SF Low Donor");
+  }
+
+  if (donorSegment.includes("Non")) {
+    tags.push("SF Non-Donor");
+  }
+
+  if (
+    donorSegment.includes("High") ||
+    donorSegment.includes("Major")
+  ) {
     tags.push("SF Major Donor");
   }
 
-  if (contact.VR__c) tags.push("SF Vision Retreat Attendee");
-  if (contact.Conferences__c) tags.push("SF Conference Attendee");
+  if (contact.VR__c) {
+    tags.push("SF Vision Retreat Attendee");
+  }
 
-  if (shopifySegment && shopifySegment !== "No Shopify") {
+  if (contact.Conferences__c) {
+    tags.push("SF Conference Attendee");
+  }
+
+  if (
+    shopifySegment &&
+    shopifySegment !== "No Shopify"
+  ) {
     tags.push("SF Shopify Buyer");
   }
 
   return tags;
 }
 
+// ======================================================
+// SEND / UPDATE XO MARKETING WITH TAG CLEANUP
+// ======================================================
 async function sendToMarketingHighLevel(contact, res, isManualSend) {
   if (!contact.Email) {
     return res.status(200).json({
@@ -285,6 +324,7 @@ async function sendToMarketingHighLevel(contact, res, isManualSend) {
   }
 
   const newSalesforceTags = buildSalesforceTags(contact, isManualSend);
+
   console.log("🏷 New Salesforce tags:", newSalesforceTags);
 
   const marketingResponse = await axios.post(
