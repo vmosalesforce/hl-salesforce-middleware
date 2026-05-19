@@ -28,6 +28,8 @@ const SALESFORCE_MANAGED_TAGS = [
   "SF Shopify Buyer"
 ];
 
+const HL_SALESFORCE_ID_FIELD_ID = "0w8kYzW7XY8L0rRwxEHA";
+
 app.get("/", (req, res) => {
   res.status(200).send("🚀 HL ↔ SF Middleware Running - Marketing Only");
 });
@@ -46,7 +48,6 @@ async function refreshAccessToken() {
 
   accessToken = response.data.access_token;
   tokenExpiry = Date.now() + 1000 * 60 * 90;
-
   console.log("🔄 Salesforce token refreshed");
 }
 
@@ -54,6 +55,29 @@ function parseDndValue(value) {
   if (value === true || value === "true") return true;
   if (value === false || value === "false") return false;
   return null;
+}
+
+async function writeSalesforceIdBackToHighLevel(hlContactId, salesforceContactId) {
+  await axios.put(
+    `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
+    {
+      customFields: [
+        {
+          id: HL_SALESFORCE_ID_FIELD_ID,
+          value: salesforceContactId
+        }
+      ]
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${HL_API_KEY}`,
+        Version: "2021-04-15",
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  console.log("✅ Salesforce Contact Id written back to HighLevel");
 }
 
 // ======================================================
@@ -72,8 +96,6 @@ app.post("/webhook", async (req, res) => {
     console.log("📦 HL Payload:", JSON.stringify(hlData, null, 2));
 
     const hlContactId = hlData.High_Level_ID__c;
-
-    // Accept either emailDnd or dnd from HighLevel workflow payload
     const dndValue = parseDndValue(hlData.emailDnd ?? hlData.dnd);
 
     if (!hlContactId) {
@@ -86,9 +108,7 @@ app.post("/webhook", async (req, res) => {
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
-        },
+        headers: { Authorization: `Bearer ${accessToken}` },
         params: {
           q: `SELECT Id FROM Contact WHERE XO_Marketing_High_Level_ID__c = '${hlContactId}' LIMIT 1`
         }
@@ -113,9 +133,9 @@ app.post("/webhook", async (req, res) => {
         );
 
         console.log(`✅ Salesforce Email Opt Out updated to ${dndValue}`);
-      } else {
-        console.log("⏭ Existing Salesforce Contact found. No DND value sent.");
       }
+
+      await writeSalesforceIdBackToHighLevel(hlContactId, sfContactId);
 
       return res.status(200).json({
         success: true,
@@ -137,7 +157,7 @@ app.post("/webhook", async (req, res) => {
       newContactBody.HasOptedOutOfEmail = dndValue;
     }
 
-    await axios.post(
+    const createResponse = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       newContactBody,
       {
@@ -148,10 +168,18 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
+    const newSalesforceContactId = createResponse.data.id;
+
+    await writeSalesforceIdBackToHighLevel(
+      hlContactId,
+      newSalesforceContactId
+    );
+
     console.log("✅ Contact created in Salesforce from HL Marketing");
 
     return res.status(200).json({
-      success: true
+      success: true,
+      salesforceContactId: newSalesforceContactId
     });
 
   } catch (error) {
@@ -187,9 +215,7 @@ app.post("/sf-webhook", async (req, res) => {
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
-        }
+        headers: { Authorization: `Bearer ${accessToken}` }
       }
     );
 
@@ -242,9 +268,7 @@ app.post("/manual-xo-marketing", async (req, res) => {
     const sfContactResponse = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
-        }
+        headers: { Authorization: `Bearer ${accessToken}` }
       }
     );
 
@@ -262,59 +286,32 @@ app.post("/manual-xo-marketing", async (req, res) => {
   }
 });
 
-// ======================================================
-// BUILD CURRENT SALESFORCE TAGS
-// ======================================================
 function buildSalesforceTags(contact, isManualSend) {
   const donorSegment = contact.HighLevel_Donor_Segments__c || "";
   const shopifySegment = contact.Shopify_Segment__c || "";
 
   let tags = ["HL Via Salesforce"];
 
-  if (isManualSend) {
-    tags.push("Manual Send to XO Marketing");
-  }
+  if (isManualSend) tags.push("Manual Send to XO Marketing");
 
-  if (donorSegment.includes("Mid")) {
-    tags.push("SF Mid Donor");
-  }
+  if (donorSegment.includes("Mid")) tags.push("SF Mid Donor");
+  if (donorSegment.includes("Low")) tags.push("SF Low Donor");
+  if (donorSegment.includes("Non")) tags.push("SF Non-Donor");
 
-  if (donorSegment.includes("Low")) {
-    tags.push("SF Low Donor");
-  }
-
-  if (donorSegment.includes("Non")) {
-    tags.push("SF Non-Donor");
-  }
-
-  if (
-    donorSegment.includes("High") ||
-    donorSegment.includes("Major")
-  ) {
+  if (donorSegment.includes("High") || donorSegment.includes("Major")) {
     tags.push("SF Major Donor");
   }
 
-  if (contact.VR__c) {
-    tags.push("SF Vision Retreat Attendee");
-  }
+  if (contact.VR__c) tags.push("SF Vision Retreat Attendee");
+  if (contact.Conferences__c) tags.push("SF Conference Attendee");
 
-  if (contact.Conferences__c) {
-    tags.push("SF Conference Attendee");
-  }
-
-  if (
-    shopifySegment &&
-    shopifySegment !== "No Shopify"
-  ) {
+  if (shopifySegment && shopifySegment !== "No Shopify") {
     tags.push("SF Shopify Buyer");
   }
 
   return tags;
 }
 
-// ======================================================
-// SEND / UPDATE XO MARKETING WITH TAG CLEANUP
-// ======================================================
 async function sendToMarketingHighLevel(contact, res, isManualSend) {
   if (!contact.Email) {
     return res.status(200).json({
@@ -397,7 +394,7 @@ async function sendToMarketingHighLevel(contact, res, isManualSend) {
       tags: finalTags,
       customFields: [
         {
-          id: "0w8kYzW7XY8L0rRwxEHA",
+          id: HL_SALESFORCE_ID_FIELD_ID,
           value: contact.Id
         }
       ]
