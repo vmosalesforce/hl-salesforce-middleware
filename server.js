@@ -42,10 +42,7 @@ const SALESFORCE_MANAGED_TAGS = [
 // CUSTOM FIELD IDS
 // ======================================================
 
-// XO Marketing SF ID field
 const XO_MARKETING_SF_FIELD_ID = "0w8kYzW7XY8L0rRwxEHA";
-
-// XO HL / Marriage SF ID field
 const XO_HL_SF_FIELD_ID = "OgA23wE1DwCjXitTl41d";
 
 // ======================================================
@@ -95,6 +92,49 @@ function parseDndValue(value) {
   }
 
   return null;
+}
+
+// ======================================================
+// GET XO HL TAGS
+// ======================================================
+async function getXOHLTags(hlContactId) {
+
+  try {
+
+    const response = await axios.get(
+      `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
+          Version: "2021-04-15",
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const tags =
+      response.data.contact?.tags ||
+      response.data.tags ||
+      [];
+
+    const xoHlTagsText =
+      Array.isArray(tags)
+        ? tags.join(", ")
+        : "";
+
+    console.log("🏷 XO HL Tags:", xoHlTagsText);
+
+    return xoHlTagsText;
+
+  } catch (error) {
+
+    console.error(
+      "⚠️ Could not pull XO HL tags:",
+      error.response?.data || error.message
+    );
+
+    return "";
+  }
 }
 
 // ======================================================
@@ -163,6 +203,9 @@ app.post("/webhook", async (req, res) => {
       });
     }
 
+    const xoHlTagsText =
+      await getXOHLTags(hlContactId);
+
     // ======================================================
     // FIND EXISTING SF CONTACT
     // ======================================================
@@ -191,27 +234,34 @@ app.post("/webhook", async (req, res) => {
       const sfContactId = query.data.records[0].Id;
 
       // ======================================================
-      // UPDATE EMAIL OPT OUT FROM DND
+      // UPDATE EMAIL OPT OUT + XO HL TAGS
       // ======================================================
+      const updateBody = {
+        XO_HL_Tags__c: xoHlTagsText
+      };
+
       if (dndValue !== null) {
+        updateBody.HasOptedOutOfEmail = dndValue;
+      }
 
-        await axios.patch(
-          `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
-          {
-            HasOptedOutOfEmail: dndValue
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json"
-            }
+      await axios.patch(
+        `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
+        updateBody,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
           }
-        );
+        }
+      );
 
+      if (dndValue !== null) {
         console.log(
           `✅ Salesforce Email Opt Out updated to ${dndValue}`
         );
       }
+
+      console.log("✅ XO HL Tags updated in Salesforce");
 
       // ======================================================
       // WRITE SF ID BACK TO XO HL
@@ -240,7 +290,8 @@ app.post("/webhook", async (req, res) => {
       HomePhone: hlData.HomePhone || null,
 
       High_Level_ID__c: hlContactId,
-      Origin_From_HL_c__c: true
+      Origin_From_HL_c__c: true,
+      XO_HL_Tags__c: xoHlTagsText
     };
 
     // ======================================================
