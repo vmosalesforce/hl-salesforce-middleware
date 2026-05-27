@@ -41,7 +41,6 @@ const SALESFORCE_MANAGED_TAGS = [
 // ======================================================
 // CUSTOM FIELD IDS
 // ======================================================
-
 const XO_MARKETING_SF_FIELD_ID = "0w8kYzW7XY8L0rRwxEHA";
 const XO_HL_SF_FIELD_ID = "OgA23wE1DwCjXitTl41d";
 
@@ -139,8 +138,6 @@ async function getXOHLTags(hlContactId) {
 
 // ======================================================
 // WRITE SF ID BACK TO XO HL SOURCE CONTACT
-// DOES NOT CREATE CONTACTS
-// ONLY UPDATES EXISTING CONTACT
 // ======================================================
 async function writeSalesforceIdBackToXOHL(
   hlContactId,
@@ -233,9 +230,6 @@ app.post("/webhook", async (req, res) => {
 
       const sfContactId = query.data.records[0].Id;
 
-      // ======================================================
-      // UPDATE EMAIL OPT OUT + XO HL TAGS
-      // ======================================================
       const updateBody = {
         XO_HL_Tags__c: xoHlTagsText
       };
@@ -263,9 +257,6 @@ app.post("/webhook", async (req, res) => {
 
       console.log("✅ XO HL Tags updated in Salesforce");
 
-      // ======================================================
-      // WRITE SF ID BACK TO XO HL
-      // ======================================================
       await writeSalesforceIdBackToXOHL(
         hlContactId,
         sfContactId
@@ -294,9 +285,6 @@ app.post("/webhook", async (req, res) => {
       XO_HL_Tags__c: xoHlTagsText
     };
 
-    // ======================================================
-    // SET EMAIL OPT OUT FROM DND
-    // ======================================================
     if (dndValue !== null) {
       newContactBody.HasOptedOutOfEmail = dndValue;
     }
@@ -316,9 +304,6 @@ app.post("/webhook", async (req, res) => {
 
     console.log("✅ Contact created in Salesforce");
 
-    // ======================================================
-    // WRITE SF ID BACK TO XO HL
-    // ======================================================
     await writeSalesforceIdBackToXOHL(
       hlContactId,
       newSalesforceContactId
@@ -376,10 +361,6 @@ app.post("/sf-webhook", async (req, res) => {
 
     const contact = sfContactResponse.data;
 
-    // ======================================================
-    // STOP ORGANIC SF CONTACTS
-    // FROM GOING TO XO HL
-    // ======================================================
     if (
       contact.Origin_From_HL_c__c !== true &&
       !contact.XO_Marketing_High_Level_ID__c
@@ -552,6 +533,22 @@ async function sendToMarketingHighLevel(
   );
 
   // ======================================================
+  // XO HL TAGS FROM SALESFORCE
+  // ======================================================
+  const xoHlTags =
+    contact.XO_HL_Tags__c
+      ? contact.XO_HL_Tags__c
+          .split(",")
+          .map(tag => tag.trim())
+          .filter(Boolean)
+      : [];
+
+  console.log(
+    "🏷 XO HL Tags from Salesforce:",
+    xoHlTags
+  );
+
+  // ======================================================
   // UPSERT XO MARKETING CONTACT
   // ======================================================
   const marketingResponse = await axios.post(
@@ -618,7 +615,8 @@ async function sendToMarketingHighLevel(
   const finalTags = [
     ...new Set([
       ...preservedHighLevelTags,
-      ...newSalesforceTags
+      ...newSalesforceTags,
+      ...xoHlTags
     ])
   ];
 
