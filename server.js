@@ -14,7 +14,7 @@ const {
   HL_API_KEY,
   HL_LOCATION_ID,
 
-  // XO HL / XO MARRIAGE (SOURCE SYSTEM)
+  // XO HL / XO MARRIAGE SOURCE SYSTEM
   HL_MARRIAGE_API_KEY,
   HL_MARRIAGE_LOCATION_ID
 } = process.env;
@@ -69,13 +69,30 @@ function parseDndValue(value) {
   return null;
 }
 
+function cleanValue(value) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === "null" ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  return value;
+}
+
+function escapeSoql(value) {
+  return String(value).replace(/'/g, "\\'");
+}
+
 async function getXOHLTags(hlContactId) {
   try {
     const response = await axios.get(
-      https://services.leadconnectorhq.com/contacts/${hlContactId},
+      `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
       {
         headers: {
-          Authorization: Bearer ${HL_MARRIAGE_API_KEY},
+          Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
           Version: "2021-04-15",
           "Content-Type": "application/json"
         }
@@ -108,7 +125,7 @@ async function writeSalesforceIdBackToXOHL(
   salesforceContactId
 ) {
   await axios.put(
-    https://services.leadconnectorhq.com/contacts/${hlContactId},
+    `https://services.leadconnectorhq.com/contacts/${hlContactId}`,
     {
       customFields: [
         {
@@ -119,7 +136,7 @@ async function writeSalesforceIdBackToXOHL(
     },
     {
       headers: {
-        Authorization: Bearer ${HL_MARRIAGE_API_KEY},
+        Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
         Version: "2021-04-15",
         "Content-Type": "application/json"
       }
@@ -130,7 +147,7 @@ async function writeSalesforceIdBackToXOHL(
 }
 
 // ======================================================
-// HL / XO HL ➜ SALESFORCE CONTACT
+// XO HL ➜ SALESFORCE CONTACT
 // ======================================================
 app.post("/webhook", async (req, res) => {
   try {
@@ -160,18 +177,18 @@ app.post("/webhook", async (req, res) => {
     const xoHlTagsText = await getXOHLTags(hlContactId);
 
     const query = await axios.get(
-      ${SF_INSTANCE_URL}/services/data/v60.0/query,
+      `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
         headers: {
-          Authorization: Bearer ${accessToken}
+          Authorization: `Bearer ${accessToken}`
         },
         params: {
-          q: 
+          q: `
             SELECT Id
             FROM Contact
-            WHERE High_Level_ID__c = '${hlContactId}'
+            WHERE High_Level_ID__c = '${escapeSoql(hlContactId)}'
             LIMIT 1
-          
+          `
         }
       }
     );
@@ -188,18 +205,18 @@ app.post("/webhook", async (req, res) => {
       }
 
       await axios.patch(
-        ${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId},
+        `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfContactId}`,
         updateBody,
         {
           headers: {
-            Authorization: Bearer ${accessToken},
+            Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json"
           }
         }
       );
 
       if (dndValue !== null) {
-        console.log(✅ Salesforce Email Opt Out updated to ${dndValue});
+        console.log(`✅ Salesforce Email Opt Out updated to ${dndValue}`);
       }
 
       console.log("✅ XO HL Tags updated in Salesforce");
@@ -233,11 +250,11 @@ app.post("/webhook", async (req, res) => {
     }
 
     const createResponse = await axios.post(
-      ${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact,
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact`,
       newContactBody,
       {
         headers: {
-          Authorization: Bearer ${accessToken},
+          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json"
         }
       }
@@ -264,7 +281,8 @@ app.post("/webhook", async (req, res) => {
     );
 
     return res.status(200).json({
-      handled: true
+      handled: true,
+      error: error.response?.data || error.message
     });
   }
 });
@@ -290,10 +308,10 @@ app.post("/sf-webhook", async (req, res) => {
     }
 
     const sfContactResponse = await axios.get(
-      ${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id},
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
         headers: {
-          Authorization: Bearer ${accessToken}
+          Authorization: `Bearer ${accessToken}`
         }
       }
     );
@@ -354,10 +372,10 @@ app.post("/manual-xo-marketing", async (req, res) => {
     }
 
     const sfContactResponse = await axios.get(
-      ${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id},
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
       {
         headers: {
-          Authorization: Bearer ${accessToken}
+          Authorization: `Bearer ${accessToken}`
         }
       }
     );
@@ -386,6 +404,7 @@ app.post("/manual-xo-marketing", async (req, res) => {
 // ======================================================
 // XO HL INVOICE PAID ➜ SALESFORCE OPPORTUNITY
 // MVP: Creates Opportunity only, no products yet
+// Handles missing/null invoice fields from HighLevel
 // ======================================================
 app.post("/invoice-paid", async (req, res) => {
   try {
@@ -402,43 +421,46 @@ app.post("/invoice-paid", async (req, res) => {
       JSON.stringify(invoice, null, 2)
     );
 
-    const invoiceId = invoice._id;
-    const invoiceNumber = invoice.invoiceNumber || invoiceId;
-    const status = invoice.status || "paid";
-    const amountPaid = invoice.amountPaid || invoice.total || 0;
-    const contactHlId = invoice.contactDetails?.id;
-    const contactEmail = invoice.contactDetails?.email;
+    const today = new Date().toISOString().substring(0, 10);
+
+    const contactHlId = cleanValue(invoice.contactDetails?.id);
+    const contactEmail = cleanValue(invoice.contactDetails?.email);
+
+    const invoiceId =
+      cleanValue(invoice._id) ||
+      cleanValue(invoice.invoiceNumber) ||
+      `HL-INVOICE-${contactHlId || contactEmail}-${Date.now()}`;
+
+    const invoiceNumber =
+      cleanValue(invoice.invoiceNumber) || invoiceId;
+
+    const status =
+      cleanValue(invoice.status) || "paid";
+
+    const amountPaid =
+      Number(cleanValue(invoice.amountPaid)) ||
+      Number(cleanValue(invoice.total)) ||
+      0;
+
     const invoiceDate =
-      invoice.issueDate ||
-      (invoice.createdAt ? invoice.createdAt.substring(0, 10) : null);
-
-    if (!invoiceId) {
-      return res.status(200).json({
-        skipped: true,
-        reason: "Missing invoice id"
-      });
-    }
-
-    if (!invoiceDate) {
-      return res.status(200).json({
-        skipped: true,
-        reason: "Missing invoice date"
-      });
-    }
+      cleanValue(invoice.issueDate) ||
+      (cleanValue(invoice.createdAt)
+        ? cleanValue(invoice.createdAt).substring(0, 10)
+        : today);
 
     const existingOppQuery = await axios.get(
-      ${SF_INSTANCE_URL}/services/data/v60.0/query,
+      `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
         headers: {
-          Authorization: Bearer ${accessToken}
+          Authorization: `Bearer ${accessToken}`
         },
         params: {
-          q: 
+          q: `
             SELECT Id
             FROM Opportunity
-            WHERE XO_HL_Invoice_ID__c = '${invoiceId}'
+            WHERE XO_HL_Invoice_ID__c = '${escapeSoql(invoiceId)}'
             LIMIT 1
-          
+          `
         }
       }
     );
@@ -456,27 +478,27 @@ app.post("/invoice-paid", async (req, res) => {
     let contactQueryText = "";
 
     if (contactHlId && contactEmail) {
-      contactQueryText = 
+      contactQueryText = `
         SELECT Id, AccountId
         FROM Contact
-        WHERE High_Level_ID__c = '${contactHlId}'
-           OR Email = '${contactEmail}'
+        WHERE High_Level_ID__c = '${escapeSoql(contactHlId)}'
+           OR Email = '${escapeSoql(contactEmail)}'
         LIMIT 1
-      ;
+      `;
     } else if (contactHlId) {
-      contactQueryText = 
+      contactQueryText = `
         SELECT Id, AccountId
         FROM Contact
-        WHERE High_Level_ID__c = '${contactHlId}'
+        WHERE High_Level_ID__c = '${escapeSoql(contactHlId)}'
         LIMIT 1
-      ;
+      `;
     } else if (contactEmail) {
-      contactQueryText = 
+      contactQueryText = `
         SELECT Id, AccountId
         FROM Contact
-        WHERE Email = '${contactEmail}'
+        WHERE Email = '${escapeSoql(contactEmail)}'
         LIMIT 1
-      ;
+      `;
     }
 
     if (!contactQueryText) {
@@ -487,10 +509,10 @@ app.post("/invoice-paid", async (req, res) => {
     }
 
     const contactQuery = await axios.get(
-      ${SF_INSTANCE_URL}/services/data/v60.0/query,
+      `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
         headers: {
-          Authorization: Bearer ${accessToken}
+          Authorization: `Bearer ${accessToken}`
         },
         params: {
           q: contactQueryText
@@ -510,7 +532,7 @@ app.post("/invoice-paid", async (req, res) => {
     const contact = contactQuery.data.records[0];
 
     const opportunityBody = {
-      Name: HL Invoice - ${invoiceNumber},
+      Name: `HL Invoice - ${invoiceNumber}`,
       RecordTypeId: "0121I000000RJCSQA4",
       StageName: "Closed Won",
       CloseDate: invoiceDate,
@@ -526,11 +548,11 @@ app.post("/invoice-paid", async (req, res) => {
     };
 
     const createOppResponse = await axios.post(
-      ${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Opportunity,
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Opportunity`,
       opportunityBody,
       {
         headers: {
-          Authorization: Bearer ${accessToken},
+          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json"
         }
       }
@@ -660,7 +682,7 @@ async function sendToMarketingHighLevel(
     },
     {
       headers: {
-        Authorization: Bearer ${HL_API_KEY},
+        Authorization: `Bearer ${HL_API_KEY}`,
         Version: "2021-04-15",
         "Content-Type": "application/json"
       }
@@ -678,10 +700,10 @@ async function sendToMarketingHighLevel(
   }
 
   const hlContactResponse = await axios.get(
-    https://services.leadconnectorhq.com/contacts/${marketingHLId},
+    `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
     {
       headers: {
-        Authorization: Bearer ${HL_API_KEY},
+        Authorization: `Bearer ${HL_API_KEY}`,
         Version: "2021-04-15",
         "Content-Type": "application/json"
       }
@@ -721,7 +743,7 @@ async function sendToMarketingHighLevel(
   );
 
   await axios.put(
-    https://services.leadconnectorhq.com/contacts/${marketingHLId},
+    `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
     {
       firstName: contact.FirstName || "",
       lastName: contact.LastName || "Unknown",
@@ -737,7 +759,7 @@ async function sendToMarketingHighLevel(
     },
     {
       headers: {
-        Authorization: Bearer ${HL_API_KEY},
+        Authorization: `Bearer ${HL_API_KEY}`,
         Version: "2021-04-15",
         "Content-Type": "application/json"
       }
@@ -745,13 +767,13 @@ async function sendToMarketingHighLevel(
   );
 
   await axios.patch(
-    ${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id},
+    `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
     {
       XO_Marketing_High_Level_ID__c: marketingHLId
     },
     {
       headers: {
-        Authorization: Bearer ${accessToken},
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json"
       }
     }
