@@ -532,11 +532,11 @@ app.post("/invoice-paid", async (req, res) => {
     const contact = contactQuery.data.records[0];
 
     const opportunityBody = {
-      Name: `HL Invoice - ${invoiceNumber}`,
-      RecordTypeId: "0121I000000RJCSQA4",
-      StageName: "Closed Won",
-      CloseDate: invoiceDate,
-      Amount: amountPaid,
+  Name: `HighLevel - ${invoice.contactDetails?.name || invoiceNumber}`,
+  RecordTypeId: "0121I000000RJCSQA4",
+  StageName: "Closed Won",
+  CloseDate: invoiceDate,
+  Amount: amountPaid,
 
       AccountId: contact.AccountId || null,
       npsp__Primary_Contact__c: contact.Id,
