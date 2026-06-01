@@ -618,23 +618,27 @@ app.post("/invoice-paid", async (req, res) => {
       });
     }
 
-    const contact = contactQuery.data.records[0];
+const contact = contactQuery.data.records[0];
 
-    const opportunityBody = {
-      Name: `XO Marriage - ${itemName}`,
-      RecordTypeId: "0121I000000RJCSQA4",
-      StageName: "Closed Won",
-      CloseDate: invoiceDate,
-      Amount: amountPaid,
+const invoiceUrl =
+  `https://link.xoinstitute.com/invoice/${invoiceId}`;
 
-      AccountId: contact.AccountId || null,
-      npsp__Primary_Contact__c: contact.Id,
+const opportunityBody = {
+  Name: `XO Marriage - ${itemName}`,
+  RecordTypeId: "0121I000000RJCSQA4",
+  StageName: "Closed Won",
+  CloseDate: invoiceDate,
+  Amount: amountPaid,
 
-      XO_HL_Invoice_ID__c: invoiceId,
-      XO_HL_Invoice_Number__c: invoiceNumber,
-      XO_HL_Status__c: status,
-      XO_HL_Invoice_Date__c: invoiceDate
-    };
+  AccountId: contact.AccountId || null,
+  npsp__Primary_Contact__c: contact.Id,
+
+  XO_HL_Invoice_ID__c: invoiceId,
+  XO_HL_Invoice_Number__c: invoiceNumber,
+  XO_HL_Status__c: status,
+  XO_HL_Invoice_Date__c: invoiceDate,
+  XO_HL_Invoice_URL__c: invoiceUrl
+};
 
     const createOppResponse = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Opportunity`,
