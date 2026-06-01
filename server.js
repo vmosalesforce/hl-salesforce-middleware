@@ -120,6 +120,57 @@ async function getXOHLTags(hlContactId) {
   }
 }
 
+async function getLatestPaidInvoiceForContact(contactHlId) {
+  try {
+    const response = await axios.get(
+      "https://services.leadconnectorhq.com/invoices/",
+      {
+        headers: {
+          Authorization: `Bearer ${HL_MARRIAGE_API_KEY}`,
+          Version: "2023-02-21",
+          "Content-Type": "application/json"
+        },
+        params: {
+          altId: HL_MARRIAGE_LOCATION_ID,
+          altType: "location",
+          contactId: contactHlId,
+          status: "paid",
+          limit: 1,
+          offset: 0,
+          sortField: "issueDate",
+          sortOrder: "desc"
+        }
+      }
+    );
+
+    console.log(
+      "📄 List Invoices Response:",
+      JSON.stringify(response.data, null, 2)
+    );
+
+    const invoices =
+      response.data.invoices ||
+      response.data.data ||
+      response.data.items ||
+      response.data.results ||
+      [];
+
+    if (!Array.isArray(invoices) || invoices.length === 0) {
+      return null;
+    }
+
+    return invoices[0];
+
+  } catch (error) {
+    console.error(
+      "❌ Could not get latest paid invoice:",
+      error.response?.data || error.message
+    );
+
+    return null;
+  }
+}
+
 async function writeSalesforceIdBackToXOHL(
   hlContactId,
   salesforceContactId
@@ -403,8 +454,7 @@ app.post("/manual-xo-marketing", async (req, res) => {
 
 // ======================================================
 // XO HL INVOICE PAID ➜ SALESFORCE OPPORTUNITY
-// MVP: Creates Opportunity only, no products yet
-// Handles missing/null invoice fields from HighLevel
+// Pulls real invoice details from HighLevel List Invoices API
 // ======================================================
 app.post("/invoice-paid", async (req, res) => {
   try {
@@ -414,39 +464,85 @@ app.post("/invoice-paid", async (req, res) => {
       await refreshAccessToken();
     }
 
-    const invoice = req.body;
+    const payload = req.body;
 
     console.log(
       "📦 Invoice Paid Payload:",
-      JSON.stringify(invoice, null, 2)
+      JSON.stringify(payload, null, 2)
     );
+
+    const contactHlId = cleanValue(payload.contactDetails?.id);
+    const contactEmail = cleanValue(payload.contactDetails?.email);
+    const contactName = cleanValue(payload.contactDetails?.name);
+
+    if (!contactHlId && !contactEmail) {
+      return res.status(200).json({
+        skipped: true,
+        reason: "Missing contact id and email"
+      });
+    }
+
+    let hlInvoice = null;
+
+    if (contactHlId) {
+      hlInvoice = await getLatestPaidInvoiceForContact(contactHlId);
+    }
+
+    if (!hlInvoice) {
+      console.log("⏭ No paid HighLevel invoice found for contact");
+
+      return res.status(200).json({
+        skipped: true,
+        reason: "No paid HighLevel invoice found for contact"
+      });
+    }
 
     const today = new Date().toISOString().substring(0, 10);
 
-    const contactHlId = cleanValue(invoice.contactDetails?.id);
-    const contactEmail = cleanValue(invoice.contactDetails?.email);
-
     const invoiceId =
-      cleanValue(invoice._id) ||
-      cleanValue(invoice.invoiceNumber) ||
+      cleanValue(hlInvoice._id) ||
+      cleanValue(hlInvoice.id) ||
       `HL-INVOICE-${contactHlId || contactEmail}-${Date.now()}`;
 
     const invoiceNumber =
-      cleanValue(invoice.invoiceNumber) || invoiceId;
+      cleanValue(hlInvoice.invoiceNumber) ||
+      cleanValue(hlInvoice.number) ||
+      invoiceId;
 
     const status =
-      cleanValue(invoice.status) || "paid";
+      cleanValue(hlInvoice.status) || "paid";
 
     const amountPaid =
-      Number(cleanValue(invoice.amountPaid)) ||
-      Number(cleanValue(invoice.total)) ||
+      Number(cleanValue(hlInvoice.amountPaid)) ||
+      Number(cleanValue(hlInvoice.total)) ||
+      Number(cleanValue(hlInvoice.totalSummary?.subTotal)) ||
       0;
 
     const invoiceDate =
-      cleanValue(invoice.issueDate) ||
-      (cleanValue(invoice.createdAt)
-        ? cleanValue(invoice.createdAt).substring(0, 10)
+      cleanValue(hlInvoice.issueDate) ||
+      (cleanValue(hlInvoice.createdAt)
+        ? cleanValue(hlInvoice.createdAt).substring(0, 10)
         : today);
+
+    const firstItem =
+      Array.isArray(hlInvoice.invoiceItems) && hlInvoice.invoiceItems.length > 0
+        ? hlInvoice.invoiceItems[0]
+        : null;
+
+    const itemName =
+      cleanValue(firstItem?.name) ||
+      cleanValue(hlInvoice.name) ||
+      contactName ||
+      invoiceNumber;
+
+    console.log("🧾 Invoice selected:", {
+      invoiceId,
+      invoiceNumber,
+      status,
+      amountPaid,
+      invoiceDate,
+      itemName
+    });
 
     const existingOppQuery = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
@@ -501,13 +597,6 @@ app.post("/invoice-paid", async (req, res) => {
       `;
     }
 
-    if (!contactQueryText) {
-      return res.status(200).json({
-        skipped: true,
-        reason: "Missing contact id and email"
-      });
-    }
-
     const contactQuery = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
       {
@@ -532,11 +621,11 @@ app.post("/invoice-paid", async (req, res) => {
     const contact = contactQuery.data.records[0];
 
     const opportunityBody = {
-  Name: `HighLevel - ${invoice.contactDetails?.name || invoiceNumber}`,
-  RecordTypeId: "0121I000000RJCSQA4",
-  StageName: "Closed Won",
-  CloseDate: invoiceDate,
-  Amount: amountPaid,
+      Name: `XO Marriage - ${itemName}`,
+      RecordTypeId: "0121I000000RJCSQA4",
+      StageName: "Closed Won",
+      CloseDate: invoiceDate,
+      Amount: amountPaid,
 
       AccountId: contact.AccountId || null,
       npsp__Primary_Contact__c: contact.Id,
@@ -562,7 +651,11 @@ app.post("/invoice-paid", async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      opportunityId: createOppResponse.data.id
+      opportunityId: createOppResponse.data.id,
+      invoiceId,
+      invoiceNumber,
+      amountPaid,
+      itemName
     });
 
   } catch (error) {
