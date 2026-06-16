@@ -250,7 +250,9 @@ app.post("/webhook", async (req, res) => {
 const updateBody = {
   XO_HL_Tags__c: xoHlTagsText,
   Relationship_Status__c:
-    cleanValue(hlData.RelationshipStatus)
+    cleanValue(hlData.RelationshipStatus),
+  Account_Creation_Date__c:
+    cleanValue(hlData.AccountCreationDate)
 };
 
       if (dndValue !== null) {
@@ -295,6 +297,9 @@ const newContactBody = {
 
   Relationship_Status__c:
     cleanValue(hlData.RelationshipStatus),
+
+  Account_Creation_Date__c:
+    cleanValue(hlData.AccountCreationDate),
 
   High_Level_ID__c: hlContactId,
   Origin_From_HL_c__c: true,
