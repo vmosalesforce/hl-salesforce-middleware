@@ -247,9 +247,11 @@ app.post("/webhook", async (req, res) => {
     if (query.data.records.length > 0) {
       const sfContactId = query.data.records[0].Id;
 
-      const updateBody = {
-        XO_HL_Tags__c: xoHlTagsText
-      };
+const updateBody = {
+  XO_HL_Tags__c: xoHlTagsText,
+  Relationship_Status__c:
+    cleanValue(hlData.RelationshipStatus)
+};
 
       if (dndValue !== null) {
         updateBody.HasOptedOutOfEmail = dndValue;
@@ -284,17 +286,20 @@ app.post("/webhook", async (req, res) => {
       });
     }
 
-    const newContactBody = {
-      FirstName: hlData.FirstName || "",
-      LastName: hlData.LastName || "Unknown",
-      Email: hlData.Email || null,
-      Phone: hlData.Phone || null,
-      HomePhone: hlData.HomePhone || null,
+const newContactBody = {
+  FirstName: hlData.FirstName || "",
+  LastName: hlData.LastName || "Unknown",
+  Email: hlData.Email || null,
+  Phone: hlData.Phone || null,
+  HomePhone: hlData.HomePhone || null,
 
-      High_Level_ID__c: hlContactId,
-      Origin_From_HL_c__c: true,
-      XO_HL_Tags__c: xoHlTagsText
-    };
+  Relationship_Status__c:
+    cleanValue(hlData.RelationshipStatus),
+
+  High_Level_ID__c: hlContactId,
+  Origin_From_HL_c__c: true,
+  XO_HL_Tags__c: xoHlTagsText
+};
 
     if (dndValue !== null) {
       newContactBody.HasOptedOutOfEmail = dndValue;
