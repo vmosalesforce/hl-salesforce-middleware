@@ -87,6 +87,21 @@ function cleanValue(value) {
   return value;
 }
 
+function formatDateForSalesforce(value) {
+  const clean = cleanValue(value);
+
+  if (!clean) return null;
+
+  const parts = clean.split("/");
+
+  if (parts.length === 3) {
+    const [month, day, year] = parts;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  return clean;
+}
+
 function escapeSoql(value) {
   return String(value).replace(/'/g, "\\'");
 }
@@ -148,10 +163,7 @@ async function getLatestPaidInvoiceForContact(contactHlId) {
       }
     );
 
-    console.log(
-      "📄 List Invoices Response:",
-      JSON.stringify(response.data, null, 2)
-    );
+    console.log("📄 Paid invoice found from HighLevel");
 
     const invoices =
       response.data.invoices ||
@@ -252,13 +264,13 @@ app.post("/webhook", async (req, res) => {
     if (query.data.records.length > 0) {
       const sfContactId = query.data.records[0].Id;
 
-const updateBody = {
-  XO_HL_Tags__c: xoHlTagsText,
-  Relationship_Status__c:
-    cleanValue(hlData.RelationshipStatus),
-  Account_Creation_Date__c:
-    cleanValue(hlData.AccountCreationDate)
-};
+      const updateBody = {
+        XO_HL_Tags__c: xoHlTagsText,
+        Relationship_Status__c:
+          cleanValue(hlData.RelationshipStatus),
+        Account_Creation_Date__c:
+          formatDateForSalesforce(hlData.AccountCreationDate)
+      };
 
       if (dndValue !== null) {
         updateBody.HasOptedOutOfEmail = dndValue;
@@ -279,7 +291,7 @@ const updateBody = {
         console.log(`✅ Salesforce Email Opt Out updated to ${dndValue}`);
       }
 
-      console.log("✅ XO HL Tags updated in Salesforce");
+      console.log("✅ XO HL fields updated in Salesforce");
 
       await writeSalesforceIdBackToXOHL(
         hlContactId,
@@ -293,23 +305,23 @@ const updateBody = {
       });
     }
 
-const newContactBody = {
-  FirstName: hlData.FirstName || "",
-  LastName: hlData.LastName || "Unknown",
-  Email: hlData.Email || null,
-  Phone: hlData.Phone || null,
-  HomePhone: hlData.HomePhone || null,
+    const newContactBody = {
+      FirstName: hlData.FirstName || "",
+      LastName: hlData.LastName || "Unknown",
+      Email: hlData.Email || null,
+      Phone: hlData.Phone || null,
+      HomePhone: hlData.HomePhone || null,
 
-  Relationship_Status__c:
-    cleanValue(hlData.RelationshipStatus),
+      Relationship_Status__c:
+        cleanValue(hlData.RelationshipStatus),
 
-  Account_Creation_Date__c:
-    cleanValue(hlData.AccountCreationDate),
+      Account_Creation_Date__c:
+        formatDateForSalesforce(hlData.AccountCreationDate),
 
-  High_Level_ID__c: hlContactId,
-  Origin_From_HL_c__c: true,
-  XO_HL_Tags__c: xoHlTagsText
-};
+      High_Level_ID__c: hlContactId,
+      Origin_From_HL_c__c: true,
+      XO_HL_Tags__c: xoHlTagsText
+    };
 
     if (dndValue !== null) {
       newContactBody.HasOptedOutOfEmail = dndValue;
@@ -633,27 +645,27 @@ app.post("/invoice-paid", async (req, res) => {
       });
     }
 
-const contact = contactQuery.data.records[0];
+    const contact = contactQuery.data.records[0];
 
-const invoiceUrl =
-  `https://link.xoinstitute.com/invoice/${invoiceId}`;
+    const invoiceUrl =
+      `https://link.xoinstitute.com/invoice/${invoiceId}`;
 
-const opportunityBody = {
-  Name: `XO Marriage - ${itemName}`,
-  RecordTypeId: "0121I000000RJCSQA4",
-  StageName: "Closed Won",
-  CloseDate: invoiceDate,
-  Amount: amountPaid,
+    const opportunityBody = {
+      Name: `XO Marriage - ${itemName}`,
+      RecordTypeId: "0121I000000RJCSQA4",
+      StageName: "Closed Won",
+      CloseDate: invoiceDate,
+      Amount: amountPaid,
 
-  AccountId: contact.AccountId || null,
-  npsp__Primary_Contact__c: contact.Id,
+      AccountId: contact.AccountId || null,
+      npsp__Primary_Contact__c: contact.Id,
 
-  XO_HL_Invoice_ID__c: invoiceId,
-  XO_HL_Invoice_Number__c: invoiceNumber,
-  XO_HL_Status__c: status,
-  XO_HL_Invoice_Date__c: invoiceDate,
-  XO_HL_Invoice_URL__c: invoiceUrl
-};
+      XO_HL_Invoice_ID__c: invoiceId,
+      XO_HL_Invoice_Number__c: invoiceNumber,
+      XO_HL_Status__c: status,
+      XO_HL_Invoice_Date__c: invoiceDate,
+      XO_HL_Invoice_URL__c: invoiceUrl
+    };
 
     const createOppResponse = await axios.post(
       `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Opportunity`,
@@ -738,6 +750,14 @@ function buildSalesforceTags(contact, isManualSend) {
     shopifySegment !== "No Shopify"
   ) {
     tags.push("SF Shopify Buyer");
+  }
+
+  if (contact.Relationship_Status__c) {
+    tags.push(
+      `marital-status-${contact.Relationship_Status__c
+        .toLowerCase()
+        .replace(/\s+/g, "-")}`
+    );
   }
 
   return tags;
