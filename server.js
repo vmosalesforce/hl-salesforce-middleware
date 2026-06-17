@@ -31,7 +31,12 @@ const SALESFORCE_MANAGED_TAGS = [
   "SF Major Donor",
   "SF Vision Retreat Attendee",
   "SF Conference Attendee",
-  "SF Shopify Buyer"
+  "SF Shopify Buyer",
+
+  "marital-status-single",
+  "marital-status-married",
+  "marital-status-divorced",
+  "marital-status-widowed"
 ];
 
 const XO_MARKETING_SF_FIELD_ID = "0w8kYzW7XY8L0rRwxEHA";
