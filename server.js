@@ -860,22 +860,21 @@ async function sendToMarketingHighLevel(
 
   console.log(
     "✅ Final tags after cleanup:",
-    finalTags
+    finalTags,
   );
-
-  await axios.put(
-    `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
-    {
-      firstName: contact.FirstName || "",
-      lastName: contact.LastName || "Unknown",
-      phone: contact.Phone || contact.HomePhone || null,
-      tags: finalTags,
-
-      console.log("🧪 Marketing field test", {
+console.log("🧪 Marketing field test", {
   relationshipStatus: contact.Relationship_Status__c,
   accountCreationDate: contact.Account_Creation_Date__c,
   weddingAnniversary: contact.Wedding_Anniversary__c
 });
+
+await axios.put(
+  `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
+  {
+    firstName: contact.FirstName || "",
+    lastName: contact.LastName || "Unknown",
+    phone: contact.Phone || contact.HomePhone || null,
+    tags: finalTags,
 
 customFields: [
   {
