@@ -892,7 +892,6 @@ async function sendToMarketingHighLevel(
     value: contact.Wedding_Anniversary__c || ""
   }
 ]
-      ]
     },
     {
       headers: {
