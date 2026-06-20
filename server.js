@@ -42,6 +42,15 @@ const SALESFORCE_MANAGED_TAGS = [
 const XO_MARKETING_SF_FIELD_ID = "0w8kYzW7XY8L0rRwxEHA";
 const XO_HL_SF_FIELD_ID = "OgA23wE1DwCjXitTl41d";
 
+const XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID =
+  "4EExVf8IIFYNbwhXrYve";
+
+const XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID =
+  "S2EWSjB4eiOaYunk65p6";
+
+const XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID =
+  "TzUr1hWzmE1DFvOPgZw1";
+
 app.get("/", (req, res) => {
   res.status(200).send("🚀 HL ↔ SF Middleware Running");
 });
@@ -265,11 +274,7 @@ app.post("/webhook", async (req, res) => {
       const sfContactId = query.data.records[0].Id;
 
       const updateBody = {
-        XO_HL_Tags__c: xoHlTagsText,
-        Relationship_Status__c:
-          cleanValue(hlData.RelationshipStatus),
-        Account_Creation_Date__c:
-          formatDateForSalesforce(hlData.AccountCreationDate)
+        XO_HL_Tags__c: xoHlTagsText
       };
 
       if (dndValue !== null) {
@@ -311,12 +316,6 @@ app.post("/webhook", async (req, res) => {
       Email: hlData.Email || null,
       Phone: hlData.Phone || null,
       HomePhone: hlData.HomePhone || null,
-
-      Relationship_Status__c:
-        cleanValue(hlData.RelationshipStatus),
-
-      Account_Creation_Date__c:
-        formatDateForSalesforce(hlData.AccountCreationDate),
 
       High_Level_ID__c: hlContactId,
       Origin_From_HL_c__c: true,
@@ -395,20 +394,6 @@ app.post("/sf-webhook", async (req, res) => {
     );
 
     const contact = sfContactResponse.data;
-
-    if (
-      contact.Origin_From_HL_c__c !== true &&
-      !contact.XO_Marketing_High_Level_ID__c
-    ) {
-      console.log(
-        "⏭ Skipped: Organic Salesforce contact not connected to XO Marketing."
-      );
-
-      return res.status(200).json({
-        skipped: true,
-        reason: "Organic Salesforce contact not connected to XO Marketing"
-      });
-    }
 
     return await sendToMarketingHighLevel(
       contact,
@@ -752,13 +737,17 @@ function buildSalesforceTags(contact, isManualSend) {
     tags.push("SF Shopify Buyer");
   }
 
-  if (contact.Relationship_Status__c) {
-    tags.push(
-      `marital-status-${contact.Relationship_Status__c
-        .toLowerCase()
-        .replace(/\s+/g, "-")}`
-    );
-  }
+  if (contact.Account_Creation_Date__c) {
+  tags.push("account-created");
+}
+
+if (contact.Relationship_Status__c) {
+  tags.push(
+    `marital-status-${contact.Relationship_Status__c
+      .toLowerCase()
+      .replace(/\s+/g, "-")}`
+  );
+}
 
   return tags;
 }
@@ -882,11 +871,27 @@ async function sendToMarketingHighLevel(
       phone: contact.Phone || contact.HomePhone || null,
       tags: finalTags,
 
-      customFields: [
-        {
-          id: XO_MARKETING_SF_FIELD_ID,
-          value: contact.Id
-        }
+    customFields: [
+  {
+    id: XO_MARKETING_SF_FIELD_ID,
+    value: contact.Id
+  },
+
+  {
+    id: XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
+    value: contact.Relationship_Status__c || ""
+  },
+
+  {
+    id: XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID,
+    value: contact.Account_Creation_Date__c || ""
+  },
+
+  {
+    id: XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID,
+    value: contact.Wedding_Anniversary__c || ""
+  }
+]
       ]
     },
     {
