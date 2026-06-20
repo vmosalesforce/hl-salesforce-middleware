@@ -871,12 +871,18 @@ async function sendToMarketingHighLevel(
       phone: contact.Phone || contact.HomePhone || null,
       tags: finalTags,
 
-    customFields: [
+      console.log("🧪 Marketing field test", {
+  relationshipStatus: contact.Relationship_Status__c,
+  accountCreationDate: contact.Account_Creation_Date__c,
+  weddingAnniversary: contact.Wedding_Anniversary__c
+});
+
+customFields: [
   {
     id: XO_MARKETING_SF_FIELD_ID,
     value: contact.Id
   },
-
+  
   {
     id: XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
     value: contact.Relationship_Status__c || ""
