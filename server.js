@@ -878,22 +878,22 @@ await axios.put(
 
 customFields: [
   {
-    id: XO_MARKETING_SF_FIELD_ID,
+    fieldId: XO_MARKETING_SF_FIELD_ID,
     value: contact.Id
   },
   
   {
-    id: XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
+    fieldId: XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
     value: contact.Relationship_Status__c || ""
   },
 
   {
-    id: XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID,
+    fieldId: XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID,
     value: contact.Account_Creation_Date__c || ""
   },
 
   {
-    id: XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID,
+    fieldId: XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID,
     value: contact.Wedding_Anniversary__c || ""
   }
 ]
