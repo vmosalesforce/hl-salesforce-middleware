@@ -878,7 +878,7 @@ await axios.put(
 
 customFields: [
   {
-    key: "contact.sf_contact_id",
+    id: XO_MARKETING_SF_FIELD_ID,
     value: contact.Id
   },
 
