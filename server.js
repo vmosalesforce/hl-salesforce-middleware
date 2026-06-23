@@ -883,17 +883,17 @@ customFields: [
   },
 
   {
-    key: "contact.relationship_status",
+    id: XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
     value: contact.Relationship_Status__c || ""
   },
 
   {
-    key: "contact.account_creation_date",
+    id: XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID,
     value: contact.Account_Creation_Date__c || ""
   },
 
   {
-    key: "contact.wedding_anniversary",
+    id: XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID,
     value: contact.Wedding_Anniversary__c || ""
   }
 ]
