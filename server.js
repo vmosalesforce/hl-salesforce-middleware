@@ -43,13 +43,13 @@ const XO_MARKETING_SF_FIELD_ID = "0w8kYzW7XY8L0rRwxEHA";
 const XO_HL_SF_FIELD_ID = "OgA23wE1DwCjXitTl41d";
 
 const XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID =
-  "4EExVf8IIFYNbwhXrYve";
+  "4EExVf8IIFYNbwhXr7ve";
 
 const XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID =
-  "S2EWSjB4eiOaYunk65p6";
+  "s2EWSjB4eiOaYunk65p6";
 
 const XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID =
-  "TzUr1hWzmE1DFvOPgZw1";
+  "TzUr1hWzmEiDFv0PgZw1";
 
 app.get("/", (req, res) => {
   res.status(200).send("🚀 HL ↔ SF Middleware Running");
