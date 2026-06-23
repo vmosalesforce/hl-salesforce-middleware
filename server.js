@@ -836,14 +836,16 @@ async function sendToMarketingHighLevel(
     hlContactResponse.data.tags ||
     [];
 
-  const preservedHighLevelTags = currentTags.filter(
-    tag =>
-      !SALESFORCE_MANAGED_TAGS.some(
-        managedTag =>
-          managedTag.toLowerCase() ===
-          String(tag).toLowerCase()
-      )
-  );
+const preservedHighLevelTags = isManualSend
+  ? currentTags
+  : currentTags.filter(
+      tag =>
+        !SALESFORCE_MANAGED_TAGS.some(
+          managedTag =>
+            managedTag.toLowerCase() ===
+            String(tag).toLowerCase()
+        )
+    );
 
   const finalTags = [
     ...new Set([
