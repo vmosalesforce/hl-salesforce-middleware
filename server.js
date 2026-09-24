@@ -32,8 +32,6 @@ const SALESFORCE_MANAGED_TAGS = [
   "SF Vision Retreat Attendee",
   "SF Conference Attendee",
   "SF Shopify Buyer",
-
-  // 2026 Partner tag
   "Partner",
 
   "marital-status-single",
@@ -136,7 +134,9 @@ async function getXOHLTags(hlContactId) {
       response.data.tags ||
       [];
 
-    const xoHlTagsText = Array.isArray(tags) ? tags.join(", ") : "";
+    const xoHlTagsText = Array.isArray(tags)
+      ? tags.join(", ")
+      : "";
 
     console.log("🏷 XO HL Tags:", xoHlTagsText);
 
@@ -239,7 +239,10 @@ app.post("/webhook", async (req, res) => {
 
     const hlData = req.body;
 
-    console.log("📦 HL Payload:", JSON.stringify(hlData, null, 2));
+    console.log(
+      "📦 HL Payload:",
+      JSON.stringify(hlData, null, 2)
+    );
 
     const hlContactId = hlData.High_Level_ID__c;
 
@@ -254,7 +257,8 @@ app.post("/webhook", async (req, res) => {
       });
     }
 
-    const xoHlTagsText = await getXOHLTags(hlContactId);
+    const xoHlTagsText =
+      await getXOHLTags(hlContactId);
 
     const query = await axios.get(
       `${SF_INSTANCE_URL}/services/data/v60.0/query`,
@@ -274,14 +278,16 @@ app.post("/webhook", async (req, res) => {
     );
 
     if (query.data.records.length > 0) {
-      const sfContactId = query.data.records[0].Id;
+      const sfContactId =
+        query.data.records[0].Id;
 
       const updateBody = {
         XO_HL_Tags__c: xoHlTagsText
       };
 
       if (dndValue !== null) {
-        updateBody.HasOptedOutOfEmail = dndValue;
+        updateBody.HasOptedOutOfEmail =
+          dndValue;
       }
 
       await axios.patch(
@@ -296,17 +302,23 @@ app.post("/webhook", async (req, res) => {
       );
 
       if (dndValue !== null) {
-        console.log(`✅ Salesforce Email Opt Out updated to ${dndValue}`);
+        console.log(
+          `✅ Salesforce Email Opt Out updated to ${dndValue}`
+        );
       }
 
-      console.log("✅ XO HL fields updated in Salesforce");
+      console.log(
+        "✅ XO HL fields updated in Salesforce"
+      );
 
       await writeSalesforceIdBackToXOHL(
         hlContactId,
         sfContactId
       );
 
-      console.log("⏭ Existing Salesforce Contact found");
+      console.log(
+        "⏭ Existing Salesforce Contact found"
+      );
 
       return res.status(200).json({
         success: true
@@ -326,7 +338,8 @@ app.post("/webhook", async (req, res) => {
     };
 
     if (dndValue !== null) {
-      newContactBody.HasOptedOutOfEmail = dndValue;
+      newContactBody.HasOptedOutOfEmail =
+        dndValue;
     }
 
     const createResponse = await axios.post(
@@ -340,9 +353,12 @@ app.post("/webhook", async (req, res) => {
       }
     );
 
-    const newSalesforceContactId = createResponse.data.id;
+    const newSalesforceContactId =
+      createResponse.data.id;
 
-    console.log("✅ Contact created in Salesforce");
+    console.log(
+      "✅ Contact created in Salesforce"
+    );
 
     await writeSalesforceIdBackToXOHL(
       hlContactId,
@@ -351,7 +367,8 @@ app.post("/webhook", async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      salesforceContactId: newSalesforceContactId
+      salesforceContactId:
+        newSalesforceContactId
     });
 
   } catch (error) {
@@ -362,7 +379,8 @@ app.post("/webhook", async (req, res) => {
 
     return res.status(200).json({
       handled: true,
-      error: error.response?.data || error.message
+      error:
+        error.response?.data || error.message
     });
   }
 });
@@ -372,7 +390,9 @@ app.post("/webhook", async (req, res) => {
 // ======================================================
 app.post("/sf-webhook", async (req, res) => {
   try {
-    console.log("📩 SF ➜ XO Marketing received");
+    console.log(
+      "📩 SF ➜ XO Marketing received"
+    );
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -387,16 +407,18 @@ app.post("/sf-webhook", async (req, res) => {
       });
     }
 
-    const sfContactResponse = await axios.get(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
+    const sfContactResponse =
+      await axios.get(
+        `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          }
         }
-      }
-    );
+      );
 
-    const contact = sfContactResponse.data;
+    const contact =
+      sfContactResponse.data;
 
     return await sendToMarketingHighLevel(
       contact,
@@ -412,7 +434,8 @@ app.post("/sf-webhook", async (req, res) => {
 
     return res.status(200).json({
       handled: true,
-      error: error.response?.data || error.message
+      error:
+        error.response?.data || error.message
     });
   }
 });
@@ -420,59 +443,76 @@ app.post("/sf-webhook", async (req, res) => {
 // ======================================================
 // MANUAL BUTTON ➜ XO MARKETING
 // ======================================================
-app.post("/manual-xo-marketing", async (req, res) => {
-  try {
-    console.log("📩 Manual SF Button ➜ XO Marketing received");
+app.post(
+  "/manual-xo-marketing",
+  async (req, res) => {
+    try {
+      console.log(
+        "📩 Manual SF Button ➜ XO Marketing received"
+      );
 
-    if (!accessToken || Date.now() > tokenExpiry) {
-      await refreshAccessToken();
-    }
+      if (
+        !accessToken ||
+        Date.now() > tokenExpiry
+      ) {
+        await refreshAccessToken();
+      }
 
-    const sfData = req.body;
+      const sfData = req.body;
 
-    if (!sfData.Id) {
+      if (!sfData.Id) {
+        return res.status(200).json({
+          skipped: true,
+          reason:
+            "Missing Salesforce Contact Id"
+        });
+      }
+
+      const sfContactResponse =
+        await axios.get(
+          `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${accessToken}`
+            }
+          }
+        );
+
+      const contact =
+        sfContactResponse.data;
+
+      return await sendToMarketingHighLevel(
+        contact,
+        res,
+        true
+      );
+
+    } catch (error) {
+      console.error(
+        "❌ Manual XO Marketing Error:",
+        error.response?.data ||
+          error.message
+      );
+
       return res.status(200).json({
-        skipped: true,
-        reason: "Missing Salesforce Contact Id"
+        handled: true,
+        error:
+          error.response?.data ||
+          error.message
       });
     }
-
-    const sfContactResponse = await axios.get(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${sfData.Id}`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
-        }
-      }
-    );
-
-    const contact = sfContactResponse.data;
-
-    return await sendToMarketingHighLevel(
-      contact,
-      res,
-      true
-    );
-
-  } catch (error) {
-    console.error(
-      "❌ Manual XO Marketing Error:",
-      error.response?.data || error.message
-    );
-
-    return res.status(200).json({
-      handled: true,
-      error: error.response?.data || error.message
-    });
   }
-});
+);
 
 // ======================================================
 // XO HL INVOICE PAID ➜ SALESFORCE OPPORTUNITY
 // ======================================================
 app.post("/invoice-paid", async (req, res) => {
   try {
-    console.log("📩 XO HL Invoice Paid ➜ Salesforce received");
+    console.log(
+      "📩 XO HL Invoice Paid ➜ Salesforce received"
+    );
 
     if (!accessToken || Date.now() > tokenExpiry) {
       await refreshAccessToken();
@@ -485,33 +525,48 @@ app.post("/invoice-paid", async (req, res) => {
       JSON.stringify(payload, null, 2)
     );
 
-    const contactHlId = cleanValue(payload.contactDetails?.id);
-    const contactEmail = cleanValue(payload.contactDetails?.email);
-    const contactName = cleanValue(payload.contactDetails?.name);
+    const contactHlId =
+      cleanValue(payload.contactDetails?.id);
+
+    const contactEmail =
+      cleanValue(payload.contactDetails?.email);
+
+    const contactName =
+      cleanValue(payload.contactDetails?.name);
 
     if (!contactHlId && !contactEmail) {
       return res.status(200).json({
         skipped: true,
-        reason: "Missing contact id and email"
+        reason:
+          "Missing contact id and email"
       });
     }
 
     let hlInvoice = null;
 
     if (contactHlId) {
-      hlInvoice = await getLatestPaidInvoiceForContact(contactHlId);
+      hlInvoice =
+        await getLatestPaidInvoiceForContact(
+          contactHlId
+        );
     }
 
     if (!hlInvoice) {
-      console.log("⏭ No paid HighLevel invoice found for contact");
+      console.log(
+        "⏭ No paid HighLevel invoice found for contact"
+      );
 
       return res.status(200).json({
         skipped: true,
-        reason: "No paid HighLevel invoice found for contact"
+        reason:
+          "No paid HighLevel invoice found for contact"
       });
     }
 
-    const today = new Date().toISOString().substring(0, 10);
+    const today =
+      new Date()
+        .toISOString()
+        .substring(0, 10);
 
     const invoiceId =
       cleanValue(hlInvoice._id) ||
@@ -524,22 +579,34 @@ app.post("/invoice-paid", async (req, res) => {
       invoiceId;
 
     const status =
-      cleanValue(hlInvoice.status) || "paid";
+      cleanValue(hlInvoice.status) ||
+      "paid";
 
     const amountPaid =
-      Number(cleanValue(hlInvoice.amountPaid)) ||
+      Number(
+        cleanValue(hlInvoice.amountPaid)
+      ) ||
       Number(cleanValue(hlInvoice.total)) ||
-      Number(cleanValue(hlInvoice.totalSummary?.subTotal)) ||
+      Number(
+        cleanValue(
+          hlInvoice.totalSummary?.subTotal
+        )
+      ) ||
       0;
 
     const invoiceDate =
       cleanValue(hlInvoice.issueDate) ||
       (cleanValue(hlInvoice.createdAt)
-        ? cleanValue(hlInvoice.createdAt).substring(0, 10)
+        ? cleanValue(
+            hlInvoice.createdAt
+          ).substring(0, 10)
         : today);
 
     const firstItem =
-      Array.isArray(hlInvoice.invoiceItems) && hlInvoice.invoiceItems.length > 0
+      Array.isArray(
+        hlInvoice.invoiceItems
+      ) &&
+      hlInvoice.invoiceItems.length > 0
         ? hlInvoice.invoiceItems[0]
         : null;
 
@@ -549,39 +616,49 @@ app.post("/invoice-paid", async (req, res) => {
       contactName ||
       invoiceNumber;
 
-    console.log("🧾 Invoice selected:", {
-      invoiceId,
-      invoiceNumber,
-      status,
-      amountPaid,
-      invoiceDate,
-      itemName
-    });
-
-    const existingOppQuery = await axios.get(
-      `${SF_INSTANCE_URL}/services/data/v60.0/query`,
+    console.log(
+      "🧾 Invoice selected:",
       {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
-        },
-        params: {
-          q: `
-            SELECT Id
-            FROM Opportunity
-            WHERE XO_HL_Invoice_ID__c = '${escapeSoql(invoiceId)}'
-            LIMIT 1
-          `
-        }
+        invoiceId,
+        invoiceNumber,
+        status,
+        amountPaid,
+        invoiceDate,
+        itemName
       }
     );
 
-    if (existingOppQuery.data.records.length > 0) {
-      console.log("⏭ Opportunity already exists for this invoice");
+    const existingOppQuery =
+      await axios.get(
+        `${SF_INSTANCE_URL}/services/data/v60.0/query`,
+        {
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`
+          },
+          params: {
+            q: `
+              SELECT Id
+              FROM Opportunity
+              WHERE XO_HL_Invoice_ID__c = '${escapeSoql(invoiceId)}'
+              LIMIT 1
+            `
+          }
+        }
+      );
+
+    if (
+      existingOppQuery.data.records.length > 0
+    ) {
+      console.log(
+        "⏭ Opportunity already exists for this invoice"
+      );
 
       return res.status(200).json({
         success: true,
         skipped: true,
-        reason: "Opportunity already exists"
+        reason:
+          "Opportunity already exists"
       });
     }
 
@@ -611,65 +688,93 @@ app.post("/invoice-paid", async (req, res) => {
       `;
     }
 
-    const contactQuery = await axios.get(
-      `${SF_INSTANCE_URL}/services/data/v60.0/query`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
-        },
-        params: {
-          q: contactQueryText
+    const contactQuery =
+      await axios.get(
+        `${SF_INSTANCE_URL}/services/data/v60.0/query`,
+        {
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`
+          },
+          params: {
+            q: contactQueryText
+          }
         }
-      }
-    );
+      );
 
-    if (contactQuery.data.records.length === 0) {
-      console.log("⏭ No matching Salesforce Contact found");
+    if (
+      contactQuery.data.records.length === 0
+    ) {
+      console.log(
+        "⏭ No matching Salesforce Contact found"
+      );
 
       return res.status(200).json({
         skipped: true,
-        reason: "No matching Salesforce Contact found"
+        reason:
+          "No matching Salesforce Contact found"
       });
     }
 
-    const contact = contactQuery.data.records[0];
+    const contact =
+      contactQuery.data.records[0];
 
     const invoiceUrl =
       `https://link.xoinstitute.com/invoice/${invoiceId}`;
 
     const opportunityBody = {
-      Name: `XO Marriage - ${itemName}`,
-      RecordTypeId: "0121I000000RJCSQA4",
+      Name:
+        `XO Marriage - ${itemName}`,
+      RecordTypeId:
+        "0121I000000RJCSQA4",
       StageName: "Closed Won",
       CloseDate: invoiceDate,
       Amount: amountPaid,
 
-      AccountId: contact.AccountId || null,
-      npsp__Primary_Contact__c: contact.Id,
+      AccountId:
+        contact.AccountId || null,
 
-      XO_HL_Invoice_ID__c: invoiceId,
-      XO_HL_Invoice_Number__c: invoiceNumber,
-      XO_HL_Status__c: status,
-      XO_HL_Invoice_Date__c: invoiceDate,
-      XO_HL_Invoice_URL__c: invoiceUrl
+      npsp__Primary_Contact__c:
+        contact.Id,
+
+      XO_HL_Invoice_ID__c:
+        invoiceId,
+
+      XO_HL_Invoice_Number__c:
+        invoiceNumber,
+
+      XO_HL_Status__c:
+        status,
+
+      XO_HL_Invoice_Date__c:
+        invoiceDate,
+
+      XO_HL_Invoice_URL__c:
+        invoiceUrl
     };
 
-    const createOppResponse = await axios.post(
-      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Opportunity`,
-      opportunityBody,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
+    const createOppResponse =
+      await axios.post(
+        `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Opportunity`,
+        opportunityBody,
+        {
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`,
+            "Content-Type":
+              "application/json"
+          }
         }
-      }
-    );
+      );
 
-    console.log("✅ Salesforce Opportunity created from XO HL invoice");
+    console.log(
+      "✅ Salesforce Opportunity created from XO HL invoice"
+    );
 
     return res.status(200).json({
       success: true,
-      opportunityId: createOppResponse.data.id,
+      opportunityId:
+        createOppResponse.data.id,
       invoiceId,
       invoiceNumber,
       amountPaid,
@@ -684,7 +789,8 @@ app.post("/invoice-paid", async (req, res) => {
 
     return res.status(200).json({
       handled: true,
-      error: error.response?.data || error.message
+      error:
+        error.response?.data || error.message
     });
   }
 });
@@ -692,9 +798,13 @@ app.post("/invoice-paid", async (req, res) => {
 // ======================================================
 // BUILD SALESFORCE TAGS
 // ======================================================
-function buildSalesforceTags(contact, isManualSend) {
+function buildSalesforceTags(
+  contact,
+  isManualSend
+) {
   const donorSegment =
-    contact.HighLevel_Donor_Segments__c || "";
+    contact.HighLevel_Donor_Segments__c ||
+    "";
 
   const shopifySegment =
     contact.Shopify_Segment__c || "";
@@ -702,7 +812,9 @@ function buildSalesforceTags(contact, isManualSend) {
   let tags = ["HL Via Salesforce"];
 
   if (isManualSend) {
-    tags.push("Manual Send to XO Marketing");
+    tags.push(
+      "Manual Send to XO Marketing"
+    );
   }
 
   if (donorSegment.includes("Mid")) {
@@ -725,11 +837,15 @@ function buildSalesforceTags(contact, isManualSend) {
   }
 
   if (contact.VR__c) {
-    tags.push("SF Vision Retreat Attendee");
+    tags.push(
+      "SF Vision Retreat Attendee"
+    );
   }
 
   if (contact.Conferences__c) {
-    tags.push("SF Conference Attendee");
+    tags.push(
+      "SF Conference Attendee"
+    );
   }
 
   if (
@@ -753,12 +869,11 @@ function buildSalesforceTags(contact, isManualSend) {
 
   // ====================================================
   // 2026 PARTNER
-  // Salesforce formula:
-  // Partner_Status_2026__c = "Partner"
-  // HighLevel tag:
-  // Partner
   // ====================================================
-  if (contact.Partner_Status_2026__c === "Partner") {
+  if (
+    contact.Partner_Status_2026__c ===
+    "Partner"
+  ) {
     tags.push("Partner");
   }
 
@@ -767,6 +882,14 @@ function buildSalesforceTags(contact, isManualSend) {
 
 // ======================================================
 // SEND TO XO MARKETING
+//
+// IMPORTANT:
+// Initial upsert DOES NOT send tags.
+//
+// We first identify/create the Marketing contact.
+// Then we retrieve its existing tags.
+// Then we remove only Salesforce-managed tags.
+// Then we merge the current Salesforce tags back in.
 // ======================================================
 async function sendToMarketingHighLevel(
   contact,
@@ -804,24 +927,35 @@ async function sendToMarketingHighLevel(
     xoHlTags
   );
 
-  const marketingResponse = await axios.post(
-    "https://services.leadconnectorhq.com/contacts/upsert",
-    {
-      locationId: HL_LOCATION_ID,
-      email: contact.Email,
-      firstName: contact.FirstName || "",
-      lastName: contact.LastName || "Unknown",
-      phone: contact.Phone || contact.HomePhone || null,
-      tags: newSalesforceTags
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${HL_API_KEY}`,
-        Version: "2021-04-15",
-        "Content-Type": "application/json"
+  // ====================================================
+  // STEP 1:
+  // Find/create Marketing contact WITHOUT touching tags.
+  // ====================================================
+  const marketingResponse =
+    await axios.post(
+      "https://services.leadconnectorhq.com/contacts/upsert",
+      {
+        locationId: HL_LOCATION_ID,
+        email: contact.Email,
+        firstName:
+          contact.FirstName || "",
+        lastName:
+          contact.LastName || "Unknown",
+        phone:
+          contact.Phone ||
+          contact.HomePhone ||
+          null
+      },
+      {
+        headers: {
+          Authorization:
+            `Bearer ${HL_API_KEY}`,
+          Version: "2021-04-15",
+          "Content-Type":
+            "application/json"
+        }
       }
-    }
-  );
+    );
 
   const marketingHLId =
     marketingResponse.data.contact?.id;
@@ -829,37 +963,73 @@ async function sendToMarketingHighLevel(
   if (!marketingHLId) {
     return res.status(200).json({
       handled: true,
-      reason: "HighLevel did not return a contact id"
+      reason:
+        "HighLevel did not return a contact id"
     });
   }
 
-  const hlContactResponse = await axios.get(
-    `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${HL_API_KEY}`,
-        Version: "2021-04-15",
-        "Content-Type": "application/json"
-      }
-    }
+  console.log(
+    "🔎 XO Marketing Contact ID:",
+    marketingHLId
   );
+
+  // ====================================================
+  // STEP 2:
+  // Pull existing Marketing tags BEFORE changing them.
+  // ====================================================
+  const hlContactResponse =
+    await axios.get(
+      `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${HL_API_KEY}`,
+          Version: "2021-04-15",
+          "Content-Type":
+            "application/json"
+        }
+      }
+    );
 
   const currentTags =
     hlContactResponse.data.contact?.tags ||
     hlContactResponse.data.tags ||
     [];
 
-  const preservedHighLevelTags = isManualSend
-    ? currentTags
-    : currentTags.filter(
-        tag =>
-          !SALESFORCE_MANAGED_TAGS.some(
-            managedTag =>
-              managedTag.toLowerCase() ===
-              String(tag).toLowerCase()
-          )
-      );
+  console.log(
+    "🏷 Existing XO Marketing tags BEFORE merge:",
+    currentTags
+  );
 
+  // ====================================================
+  // STEP 3:
+  // Preserve everything HighLevel owns.
+  //
+  // Only remove tags explicitly managed by Salesforce.
+  // Those Salesforce tags are rebuilt from current SF data.
+  // ====================================================
+  const preservedHighLevelTags =
+    currentTags.filter(
+      tag =>
+        !SALESFORCE_MANAGED_TAGS.some(
+          managedTag =>
+            managedTag.toLowerCase() ===
+            String(tag).toLowerCase()
+        )
+    );
+
+  console.log(
+    "🧹 Preserved HighLevel-only tags:",
+    preservedHighLevelTags
+  );
+
+  // ====================================================
+  // STEP 4:
+  // Merge:
+  // - HighLevel-owned tags
+  // - current Salesforce-managed tags
+  // - tags captured from XO HL source
+  // ====================================================
   const finalTags = [
     ...new Set([
       ...preservedHighLevelTags,
@@ -869,75 +1039,113 @@ async function sendToMarketingHighLevel(
   ];
 
   console.log(
-    "🧹 Preserved HL-only tags:",
-    preservedHighLevelTags
-  );
-
-  console.log(
-    "✅ Final tags after cleanup:",
+    "✅ Final tags after safe merge:",
     finalTags
   );
 
-  console.log("🧪 Marketing field test", {
-    relationshipStatus: contact.Relationship_Status__c,
-    accountCreationDate: contact.Account_Creation_Date__c,
-    weddingAnniversary: contact.Wedding_Anniversary__c,
-    partnerStatus2026: contact.Partner_Status_2026__c
-  });
+  console.log(
+    "🧪 Marketing field test",
+    {
+      relationshipStatus:
+        contact.Relationship_Status__c,
 
+      accountCreationDate:
+        contact.Account_Creation_Date__c,
+
+      weddingAnniversary:
+        contact.Wedding_Anniversary__c,
+
+      partnerStatus2026:
+        contact.Partner_Status_2026__c
+    }
+  );
+
+  // ====================================================
+  // STEP 5:
+  // Update Marketing contact with SAFE merged tag list.
+  // ====================================================
   await axios.put(
     `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
     {
-      firstName: contact.FirstName || "",
-      lastName: contact.LastName || "Unknown",
-      phone: contact.Phone || contact.HomePhone || null,
+      firstName:
+        contact.FirstName || "",
+
+      lastName:
+        contact.LastName || "Unknown",
+
+      phone:
+        contact.Phone ||
+        contact.HomePhone ||
+        null,
+
       tags: finalTags,
 
       customFields: [
         {
-          id: XO_MARKETING_SF_FIELD_ID,
+          id:
+            XO_MARKETING_SF_FIELD_ID,
           value: contact.Id
         },
 
         {
-          id: XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
-          value: contact.Relationship_Status__c || ""
+          id:
+            XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
+          value:
+            contact.Relationship_Status__c ||
+            ""
         },
 
         {
-          id: XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID,
-          value: contact.Account_Creation_Date__c || ""
+          id:
+            XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID,
+          value:
+            contact.Account_Creation_Date__c ||
+            ""
         },
 
         {
-          id: XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID,
-          value: contact.Wedding_Anniversary__c || ""
+          id:
+            XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID,
+          value:
+            contact.Wedding_Anniversary__c ||
+            ""
         }
       ]
     },
     {
       headers: {
-        Authorization: `Bearer ${HL_API_KEY}`,
+        Authorization:
+          `Bearer ${HL_API_KEY}`,
         Version: "2021-04-15",
-        "Content-Type": "application/json"
+        "Content-Type":
+          "application/json"
       }
     }
   );
 
+  // ====================================================
+  // STEP 6:
+  // Store Marketing HighLevel ID in Salesforce.
+  // ====================================================
   await axios.patch(
     `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/Contact/${contact.Id}`,
     {
-      XO_Marketing_High_Level_ID__c: marketingHLId
+      XO_Marketing_High_Level_ID__c:
+        marketingHLId
     },
     {
       headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
+        Authorization:
+          `Bearer ${accessToken}`,
+        "Content-Type":
+          "application/json"
       }
     }
   );
 
-  console.log("✅ XO Marketing sync complete");
+  console.log(
+    "✅ XO Marketing sync complete"
+  );
 
   return res.status(200).json({
     success: true,
@@ -947,5 +1155,7 @@ async function sendToMarketingHighLevel(
 }
 
 app.listen(3000, () => {
-  console.log("🚀 Server running on port 3000");
+  console.log(
+    "🚀 Server running on port 3000"
+  );
 });
