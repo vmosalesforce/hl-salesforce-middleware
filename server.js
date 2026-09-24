@@ -33,6 +33,9 @@ const SALESFORCE_MANAGED_TAGS = [
   "SF Conference Attendee",
   "SF Shopify Buyer",
 
+  // 2026 Partner tag
+  "Partner",
+
   "marital-status-single",
   "marital-status-married",
   "marital-status-divorced",
@@ -466,7 +469,6 @@ app.post("/manual-xo-marketing", async (req, res) => {
 
 // ======================================================
 // XO HL INVOICE PAID ➜ SALESFORCE OPPORTUNITY
-// Pulls real invoice details from HighLevel List Invoices API
 // ======================================================
 app.post("/invoice-paid", async (req, res) => {
   try {
@@ -738,16 +740,27 @@ function buildSalesforceTags(contact, isManualSend) {
   }
 
   if (contact.Account_Creation_Date__c) {
-  tags.push("account-created");
-}
+    tags.push("account-created");
+  }
 
-if (contact.Relationship_Status__c) {
-  tags.push(
-    `marital-status-${contact.Relationship_Status__c
-      .toLowerCase()
-      .replace(/\s+/g, "-")}`
-  );
-}
+  if (contact.Relationship_Status__c) {
+    tags.push(
+      `marital-status-${contact.Relationship_Status__c
+        .toLowerCase()
+        .replace(/\s+/g, "-")}`
+    );
+  }
+
+  // ====================================================
+  // 2026 PARTNER
+  // Salesforce formula:
+  // Partner_Status_2026__c = "Partner"
+  // HighLevel tag:
+  // Partner
+  // ====================================================
+  if (contact.Partner_Status_2026__c === "Partner") {
+    tags.push("Partner");
+  }
 
   return tags;
 }
@@ -836,16 +849,16 @@ async function sendToMarketingHighLevel(
     hlContactResponse.data.tags ||
     [];
 
-const preservedHighLevelTags = isManualSend
-  ? currentTags
-  : currentTags.filter(
-      tag =>
-        !SALESFORCE_MANAGED_TAGS.some(
-          managedTag =>
-            managedTag.toLowerCase() ===
-            String(tag).toLowerCase()
-        )
-    );
+  const preservedHighLevelTags = isManualSend
+    ? currentTags
+    : currentTags.filter(
+        tag =>
+          !SALESFORCE_MANAGED_TAGS.some(
+            managedTag =>
+              managedTag.toLowerCase() ===
+              String(tag).toLowerCase()
+          )
+      );
 
   const finalTags = [
     ...new Set([
@@ -862,43 +875,45 @@ const preservedHighLevelTags = isManualSend
 
   console.log(
     "✅ Final tags after cleanup:",
-    finalTags,
+    finalTags
   );
-console.log("🧪 Marketing field test", {
-  relationshipStatus: contact.Relationship_Status__c,
-  accountCreationDate: contact.Account_Creation_Date__c,
-  weddingAnniversary: contact.Wedding_Anniversary__c
-});
 
-await axios.put(
-  `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
-  {
-    firstName: contact.FirstName || "",
-    lastName: contact.LastName || "Unknown",
-    phone: contact.Phone || contact.HomePhone || null,
-    tags: finalTags,
+  console.log("🧪 Marketing field test", {
+    relationshipStatus: contact.Relationship_Status__c,
+    accountCreationDate: contact.Account_Creation_Date__c,
+    weddingAnniversary: contact.Wedding_Anniversary__c,
+    partnerStatus2026: contact.Partner_Status_2026__c
+  });
 
-customFields: [
-  {
-    id: XO_MARKETING_SF_FIELD_ID,
-    value: contact.Id
-  },
+  await axios.put(
+    `https://services.leadconnectorhq.com/contacts/${marketingHLId}`,
+    {
+      firstName: contact.FirstName || "",
+      lastName: contact.LastName || "Unknown",
+      phone: contact.Phone || contact.HomePhone || null,
+      tags: finalTags,
 
-  {
-    id: XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
-    value: contact.Relationship_Status__c || ""
-  },
+      customFields: [
+        {
+          id: XO_MARKETING_SF_FIELD_ID,
+          value: contact.Id
+        },
 
-  {
-    id: XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID,
-    value: contact.Account_Creation_Date__c || ""
-  },
+        {
+          id: XO_MARKETING_RELATIONSHIP_STATUS_FIELD_ID,
+          value: contact.Relationship_Status__c || ""
+        },
 
-  {
-    id: XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID,
-    value: contact.Wedding_Anniversary__c || ""
-  }
-]
+        {
+          id: XO_MARKETING_ACCOUNT_CREATION_DATE_FIELD_ID,
+          value: contact.Account_Creation_Date__c || ""
+        },
+
+        {
+          id: XO_MARKETING_WEDDING_ANNIVERSARY_FIELD_ID,
+          value: contact.Wedding_Anniversary__c || ""
+        }
+      ]
     },
     {
       headers: {
