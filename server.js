@@ -1,5 +1,6 @@
 import express from "express";
 import axios from "axios";
+import { timingSafeEqual } from "node:crypto";
 
 const app = express();
 app.use(express.json());
@@ -382,6 +383,97 @@ app.post("/webhook", async (req, res) => {
       error:
         error.response?.data || error.message
     });
+  }
+});
+
+// ======================================================
+// XO MARKETING ➜ SALESFORCE XO CHURCH LEADS
+// ======================================================
+// Configure XO_CHURCH_WEBHOOK_SECRET in Render's Environment.
+// In HighLevel's outbound Webhook action, set the same value
+// in the X-Webhook-Secret request header.
+app.post("/xo-church-lead", async (req, res) => {
+  const configuredSecret = process.env.XO_CHURCH_WEBHOOK_SECRET;
+  const receivedSecret = req.get("X-Webhook-Secret") || "";
+
+  if (!configuredSecret) {
+    console.error("❌ XO Church Lead webhook secret is not configured");
+    return res.status(503).json({ success: false, error: "Webhook unavailable" });
+  }
+
+  const expected = Buffer.from(configuredSecret);
+  const actual = Buffer.from(receivedSecret);
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    return res.status(401).json({ success: false, error: "Unauthorized" });
+  }
+
+  const data = req.body;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return res.status(400).json({ success: false, error: "Invalid JSON object" });
+  }
+
+  // Use these exact keys in the HighLevel Webhook Custom Data action.
+  const readField = (...keys) => {
+    for (const key of keys) {
+      const value = data[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+    return null;
+  };
+
+  const firstName = readField("firstName", "FirstName", "first_name");
+  const lastName = readField("lastName", "LastName", "last_name");
+  const email = readField("email", "Email");
+  const churchName = readField("churchName", "ChurchName", "church_name");
+  const role = readField("role", "Role");
+  const churchSize = readField("churchSize", "ChurchSize", "church_size");
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ success: false, error: "Valid email is required" });
+  }
+
+  const tooLong = [firstName, lastName, churchName, role, churchSize]
+    .some(value => value && value.length > 255);
+  if (tooLong || email.length > 80) {
+    return res.status(400).json({ success: false, error: "Field value exceeds allowed length" });
+  }
+
+  const personName = [firstName, lastName].filter(Boolean).join(" ");
+  const recordName = [personName, churchName].filter(Boolean).join(" - ") || email;
+
+  const leadBody = {
+    Name: recordName.substring(0, 80),
+    First_Name__c: firstName,
+    Last_Name__c: lastName,
+    Email__c: email,
+    Church_Name__c: churchName,
+    Role__c: role,
+    Church_Size__c: churchSize
+  };
+
+  try {
+    if (!accessToken || Date.now() > tokenExpiry) {
+      await refreshAccessToken();
+    }
+
+    const response = await axios.post(
+      `${SF_INSTANCE_URL}/services/data/v60.0/sobjects/XO_Church_Leads__c`,
+      leadBody,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    console.log("✅ XO Church Lead created in Salesforce:", response.data.id);
+    return res.status(201).json({ success: true, salesforceId: response.data.id });
+  } catch (error) {
+    // Avoid writing form submissions or Salesforce error details containing PII to logs.
+    console.error("❌ XO Church Lead creation failed; status:", error.response?.status || "unknown");
+    return res.status(502).json({ success: false, error: "Salesforce record creation failed" });
   }
 });
 
